@@ -113,6 +113,23 @@ type lyricsState struct {
 	scroll  int
 }
 
+// coverState holds album-cover display state for the two-column now-playing
+// header. rows==0 means the feature is disabled. cols is the derived cell width
+// (2*rows, for a squareish image). rendered is the half-block string for the
+// current cover; shown is recomputed each layout pass (full tier, wide enough).
+type coverState struct {
+	visible  bool // runtime toggle; seeded from config
+	rows     int  // configured cell height; 0 disables the feature
+	cols     int  // derived display width in cells
+	url      string
+	rendered string
+	loading  bool
+	failed   bool
+	shown    bool
+	kitty    bool   // render via Kitty graphics protocol instead of half-blocks
+	kittyID  uint32 // image id of the currently transmitted cover (0 = none)
+}
+
 // keymapOverlay holds state for the keybindings overlay.
 type keymapOverlay struct {
 	visible     bool
@@ -255,6 +272,7 @@ type requestState struct {
 	tracks       uint64
 	nav          uint64
 	lyrics       uint64
+	cover        uint64
 	netSearch    uint64
 	spotSearch   uint64
 	spotAlbum    uint64
@@ -329,6 +347,15 @@ type ytdlBatchState struct {
 
 // reconnectState holds state for stream auto-reconnect with exponential backoff.
 type reconnectState struct {
+	attempts int
+	at       time.Time
+}
+
+// preloadFailState tracks repeated gapless-preload failures for a single
+// next-track path so the tick loop backs off instead of retrying every
+// tick. Mirrors reconnectState's exponential backoff / attempt cap.
+type preloadFailState struct {
+	path     string
 	attempts int
 	at       time.Time
 }

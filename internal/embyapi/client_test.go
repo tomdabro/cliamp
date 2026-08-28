@@ -304,6 +304,41 @@ func TestStreamURL(t *testing.T) {
 	}
 }
 
+func TestItemArtURL(t *testing.T) {
+	c := NewEmbyClient("https://emby.example.com", "tok", "user-1", "", "")
+
+	t.Run("prefers track's own primary image", func(t *testing.T) {
+		u := c.itemArtURL(itemDTO{
+			ID:                   "track-1",
+			ImageTags:            map[string]string{"Primary": "trackTag"},
+			AlbumID:              "album-1",
+			AlbumPrimaryImageTag: "albumTag",
+		})
+		if !strings.HasPrefix(u, "https://emby.example.com/Items/track-1/Images/Primary?") {
+			t.Fatalf("URL = %q, want track image route", u)
+		}
+		if !strings.Contains(u, "tag=trackTag") || !strings.Contains(u, "api_key=tok") {
+			t.Fatalf("URL missing tag/api_key: %q", u)
+		}
+	})
+
+	t.Run("falls back to album image", func(t *testing.T) {
+		u := c.itemArtURL(itemDTO{ID: "track-1", AlbumID: "album-1", AlbumPrimaryImageTag: "albumTag"})
+		if !strings.HasPrefix(u, "https://emby.example.com/Items/album-1/Images/Primary?") {
+			t.Fatalf("URL = %q, want album image route", u)
+		}
+		if !strings.Contains(u, "tag=albumTag") {
+			t.Fatalf("URL missing album tag: %q", u)
+		}
+	})
+
+	t.Run("empty when no tagged image", func(t *testing.T) {
+		if u := c.itemArtURL(itemDTO{ID: "track-1", AlbumID: "album-1"}); u != "" {
+			t.Fatalf("URL = %q, want empty", u)
+		}
+	})
+}
+
 func TestReportScrobble(t *testing.T) {
 	c := NewJellyfinClient("https://jf.example.com", "tok", "user-1", "", "")
 	call := 0

@@ -30,6 +30,7 @@ type playbackFakeEngine struct {
 	seekYTDLCalls       []time.Duration
 	playAtOffsets       []time.Duration
 	preloadCalls        []string
+	preloadErr          error
 	clearPreloadCalls   int
 	cancelSeekYTDLCalls int
 	stopCalls           int
@@ -66,7 +67,7 @@ func (f *playbackFakeEngine) PlayYTDLForGeneration(_ string, _ time.Duration, ge
 }
 func (f *playbackFakeEngine) Preload(path string, _ time.Duration) error {
 	f.preloadCalls = append(f.preloadCalls, path)
-	return nil
+	return f.preloadErr
 }
 func (f *playbackFakeEngine) PreloadYTDL(string, time.Duration) error { return nil }
 func (f *playbackFakeEngine) BeginPreload() uint64 {
@@ -924,5 +925,113 @@ func TestQueueToggleRearmsGaplessPreload(t *testing.T) {
 	cmd()
 	if len(player.preloadCalls) != 1 || player.preloadCalls[0] != "c.mp3" {
 		t.Fatalf("preloadCalls = %v, want [c.mp3] (queued track, not order-next b.mp3)", player.preloadCalls)
+	}
+}
+
+// modelWithFailingPreloadTarget returns a model positioned so PeekNext()
+// resolves to a stream track whose Preload() always fails, mirroring a
+// Spotify session stuck in an auth loop.
+func modelWithFailingPreloadTarget(t *testing.T, preloadErr error) (Model, *playbackFakeEngine) {
+	t.Helper()
+	// Position the current track within streamPreloadLeadTime of its end so
+	// preloadNext() arms the gapless pipeline instead of deferring.
+	player := &playbackFakeEngine{playing: true, preloadErr: preloadErr, duration: time.Minute, position: 59 * time.Second}
+	p := playlist.New()
+	p.Replace([]playlist.Track{
+		{Title: "Current", Path: "current.mp3", DurationSecs: 180},
+		{Title: "Next", Path: "spotify:track:next", DurationSecs: 180, Stream: true},
+	})
+	p.SetIndex(0)
+	return Model{player: player, playlist: p}, player
+}
+
+// driveOnePreload runs one preloadNext() attempt through to its
+// streamPreloadedMsg result and returns the updated model. Fails the test
+// if preloadNext() declines to dispatch (e.g. still inside a backoff
+// window), since callers use this only where a dispatch is expected.
+func driveOnePreload(t *testing.T, m Model) Model {
+	t.Helper()
+	cmd := m.preloadNext()
+	if cmd == nil {
+		t.Fatal("preloadNext() = nil, want preload command")
+	}
+	updated, _ := m.Update(cmd())
+	return updated.(Model)
+}
+
+// TestPreloadNextThrottlesRetryAfterFailure guards against a retry storm: a
+// next-track path whose Preload() fails (e.g. a stale Spotify auth session)
+// must not be retried on the very next tick. Regression for a bug where
+// preloadNext() re-attempted on every tick with no backoff at all, hammering
+// the provider's reconnect endpoint continuously and flooding the UI footer
+// with warnings for as long as the current track kept playing.
+func TestPreloadNextThrottlesRetryAfterFailure(t *testing.T) {
+	m, player := modelWithFailingPreloadTarget(t, errors.New("stream auth error"))
+
+	m = driveOnePreload(t, m)
+	if len(player.preloadCalls) != 1 {
+		t.Fatalf("preloadCalls = %d, want 1", len(player.preloadCalls))
+	}
+	if m.preloadFail.attempts != 1 || m.preloadFail.path != "spotify:track:next" {
+		t.Fatalf("preloadFail = %+v, want attempts=1 for the failed path", m.preloadFail)
+	}
+
+	// The very next tick must not retry immediately — this is the fix.
+	// Before it, preloadNext() had no cooldown and fired again unconditionally.
+	if cmd := m.preloadNext(); cmd != nil {
+		t.Fatal("preloadNext() immediately after a failure = non-nil command, want nil (still backing off)")
+	}
+	if got := len(player.preloadCalls); got != 1 {
+		t.Fatalf("preloadCalls after immediate retry attempt = %d, want still 1", got)
+	}
+}
+
+// TestPreloadNextGivesUpAfterFiveFailures verifies that once a next-track
+// path has failed 5 times, preloadNext() stops trying entirely — even once
+// any backoff window has elapsed — until the track changes. This bounds the
+// total retries per track pair instead of backing off forever.
+func TestPreloadNextGivesUpAfterFiveFailures(t *testing.T) {
+	m, _ := modelWithFailingPreloadTarget(t, errors.New("stream auth error"))
+
+	// Fast-forward past 5 recorded failures for the next-track path without
+	// waiting on the real backoff clock.
+	m.preloadFail = preloadFailState{
+		path:     "spotify:track:next",
+		attempts: 5,
+		at:       time.Now().Add(-time.Hour), // any backoff window is long past
+	}
+
+	if cmd := m.preloadNext(); cmd != nil {
+		t.Fatal("preloadNext() after 5 failures = non-nil command, want nil (gave up)")
+	}
+}
+
+// TestPreloadNextResetsBackoffOnSuccess verifies a successful preload clears
+// any accumulated failure state, so a track that starts working again isn't
+// permanently blocked from gapless preload.
+func TestPreloadNextResetsBackoffOnSuccess(t *testing.T) {
+	m, player := modelWithFailingPreloadTarget(t, errors.New("stream auth error"))
+
+	m = driveOnePreload(t, m)
+	if m.preloadFail.attempts != 1 {
+		t.Fatalf("preloadFail.attempts = %d, want 1", m.preloadFail.attempts)
+	}
+
+	// Clear the error and fast-forward past the backoff window so the next
+	// attempt is allowed to fire, as it would once the real clock advances.
+	player.preloadErr = nil
+	m.preloadFail.at = time.Now().Add(-time.Hour)
+
+	m = driveOnePreload(t, m)
+	if m.preloadFail.path != "" || m.preloadFail.attempts != 0 {
+		t.Fatalf("preloadFail = %+v, want zero value after success", m.preloadFail)
+	}
+	if got := len(player.preloadCalls); got != 2 {
+		t.Fatalf("preloadCalls = %d, want 2", got)
+	}
+
+	// Not blocked by stale backoff state after success.
+	if cmd := m.preloadNext(); cmd == nil {
+		t.Fatal("preloadNext() after success = nil, want command")
 	}
 }

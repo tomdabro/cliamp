@@ -16,9 +16,10 @@ import (
 
 // itemInfo holds metadata for a single video in a playlist.
 type itemInfo struct {
-	videoID string
-	title   string
-	channel string
+	videoID  string
+	title    string
+	channel  string
+	thumbURL string
 }
 
 // youtubeAPIBatchSize is the maximum number of items per YouTube Data API request.
@@ -354,9 +355,10 @@ func (b *baseProvider) tracks(playlistID string) ([]playlist.Track, error) {
 				continue
 			}
 			items = append(items, itemInfo{
-				videoID: vid,
-				title:   title,
-				channel: channel,
+				videoID:  vid,
+				title:    title,
+				channel:  channel,
+				thumbURL: pickThumbnail(item.Snippet.Thumbnails),
 			})
 		}
 
@@ -376,6 +378,7 @@ func (b *baseProvider) tracks(playlistID string) ([]playlist.Track, error) {
 			Artist:       cleanChannelName(it.channel),
 			Stream:       false,
 			DurationSecs: durations[it.videoID],
+			AlbumArtURL:  it.thumbURL,
 		})
 	}
 
@@ -617,4 +620,19 @@ func parseISO8601Duration(d string) int {
 func cleanChannelName(name string) string {
 	name = strings.TrimSuffix(name, " - Topic")
 	return name
+}
+
+// pickThumbnail returns a mid-size thumbnail URL from a YouTube snippet's
+// thumbnail set, preferring Medium and degrading to whatever is available.
+// Returns "" when the snippet carries no thumbnails.
+func pickThumbnail(td *youtube.ThumbnailDetails) string {
+	if td == nil {
+		return ""
+	}
+	for _, t := range []*youtube.Thumbnail{td.Medium, td.High, td.Standard, td.Default, td.Maxres} {
+		if t != nil && t.Url != "" {
+			return t.Url
+		}
+	}
+	return ""
 }

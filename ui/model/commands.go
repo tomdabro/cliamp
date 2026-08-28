@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/bjarneo/cliamp/history"
+	"github.com/bjarneo/cliamp/internal/coverart"
 	"github.com/bjarneo/cliamp/internal/playback"
 	"github.com/bjarneo/cliamp/lyrics"
 	"github.com/bjarneo/cliamp/player"
@@ -110,6 +111,7 @@ type streamPlayedMsg struct {
 type streamPreloadedMsg struct {
 	path string
 	gen  uint64
+	err  error
 }
 
 type attachNotifierMsg struct{ notifier playback.Notifier }
@@ -264,6 +266,52 @@ func fetchLyricsCmd(artist, title, query string, gen uint64) tea.Cmd {
 	}
 }
 
+// coverLoadedMsg carries a rendered album cover for a track. rendered is the
+// cell content placed in the cover column (half-blocks, or Kitty Unicode
+// placeholders). transmit, when non-empty, is the out-of-band Kitty graphics
+// sequence to write to the terminal via tea.Raw.
+type coverLoadedMsg struct {
+	url      string
+	rendered string
+	transmit string
+	err      error
+	gen      uint64
+}
+
+// coverRequest carries the parameters for an async cover load.
+type coverRequest struct {
+	url        string
+	cols, rows int
+	gen        uint64
+	kitty      bool
+	id, prevID uint32 // Kitty image ids (new / to delete)
+}
+
+// fetchCoverCmd downloads and renders the cover off the UI goroutine. In Kitty
+// mode it returns placeholder cells plus the transmit sequence; otherwise a
+// half-block rendering.
+func fetchCoverCmd(req coverRequest) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		img, err := coverart.Image(ctx, req.url)
+		if err != nil {
+			return coverLoadedMsg{url: req.url, err: err, gen: req.gen}
+		}
+		if req.kitty {
+			placeholders := coverart.KittyPlaceholders(req.id, req.cols, req.rows)
+			if placeholders != "" {
+				transmit, terr := coverart.KittyTransmit(req.id, img, req.cols, req.rows, req.prevID)
+				if terr == nil {
+					return coverLoadedMsg{url: req.url, rendered: placeholders, transmit: transmit, gen: req.gen}
+				}
+			}
+			// Fall through to half-blocks if Kitty encoding failed.
+		}
+		return coverLoadedMsg{url: req.url, rendered: coverart.HalfBlocks(img, req.cols, req.rows), gen: req.gen}
+	}
+}
+
 func fetchTrackLyricsCmd(track playlist.Track, artist, title, query string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		if lines := lyrics.ParseEmbedded(track.EmbeddedLyrics); len(lines) > 0 {
@@ -289,15 +337,15 @@ func playStreamCmd(p player.Engine, path string, knownDuration time.Duration, st
 
 func preloadStreamCmd(p player.Engine, path string, knownDuration time.Duration, gen, preloadGen uint64) tea.Cmd {
 	return func() tea.Msg {
-		p.PreloadForGeneration(path, knownDuration, preloadGen) // errors silently ignored
-		return streamPreloadedMsg{path: path, gen: gen}
+		err := p.PreloadForGeneration(path, knownDuration, preloadGen)
+		return streamPreloadedMsg{path: path, gen: gen, err: err}
 	}
 }
 
 func preloadLocalCmd(p player.Engine, path string, knownDuration time.Duration, gen, preloadGen uint64) tea.Cmd {
 	return func() tea.Msg {
-		p.PreloadForGeneration(path, knownDuration, preloadGen)
-		return streamPreloadedMsg{path: path, gen: gen}
+		err := p.PreloadForGeneration(path, knownDuration, preloadGen)
+		return streamPreloadedMsg{path: path, gen: gen, err: err}
 	}
 }
 
@@ -309,8 +357,8 @@ func playYTDLStreamCmd(p player.Engine, pageURL string, knownDuration time.Durat
 
 func preloadYTDLStreamCmd(p player.Engine, pageURL string, knownDuration time.Duration, gen, preloadGen uint64) tea.Cmd {
 	return func() tea.Msg {
-		p.PreloadYTDLForGeneration(pageURL, knownDuration, preloadGen) // errors silently ignored
-		return streamPreloadedMsg{path: pageURL, gen: gen}
+		err := p.PreloadYTDLForGeneration(pageURL, knownDuration, preloadGen)
+		return streamPreloadedMsg{path: pageURL, gen: gen, err: err}
 	}
 }
 

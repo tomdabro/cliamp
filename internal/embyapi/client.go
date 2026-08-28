@@ -131,6 +131,7 @@ type Track struct {
 	Year         int
 	TrackNumber  int
 	DurationSecs int
+	ArtURL       string
 }
 
 type userDTO struct {
@@ -144,19 +145,22 @@ type itemsResponseDTO struct {
 }
 
 type itemDTO struct {
-	ID             string      `json:"Id"`
-	Name           string      `json:"Name"`
-	Type           string      `json:"Type"`
-	CollectionType string      `json:"CollectionType,omitempty"`
-	Album          string      `json:"Album,omitempty"`
-	AlbumArtist    string      `json:"AlbumArtist,omitempty"`
-	AlbumArtists   []nameIDDTO `json:"AlbumArtists,omitempty"`
-	Artists        []string    `json:"Artists,omitempty"`
-	ArtistItems    []nameIDDTO `json:"ArtistItems,omitempty"`
-	ProductionYear int         `json:"ProductionYear,omitempty"`
-	ChildCount     int         `json:"ChildCount,omitempty"`
-	IndexNumber    int         `json:"IndexNumber,omitempty"`
-	RunTimeTicks   int64       `json:"RunTimeTicks,omitempty"`
+	ID                   string            `json:"Id"`
+	Name                 string            `json:"Name"`
+	Type                 string            `json:"Type"`
+	CollectionType       string            `json:"CollectionType,omitempty"`
+	Album                string            `json:"Album,omitempty"`
+	AlbumArtist          string            `json:"AlbumArtist,omitempty"`
+	AlbumArtists         []nameIDDTO       `json:"AlbumArtists,omitempty"`
+	Artists              []string          `json:"Artists,omitempty"`
+	ArtistItems          []nameIDDTO       `json:"ArtistItems,omitempty"`
+	ProductionYear       int               `json:"ProductionYear,omitempty"`
+	ChildCount           int               `json:"ChildCount,omitempty"`
+	IndexNumber          int               `json:"IndexNumber,omitempty"`
+	RunTimeTicks         int64             `json:"RunTimeTicks,omitempty"`
+	ImageTags            map[string]string `json:"ImageTags,omitempty"`
+	AlbumID              string            `json:"AlbumId,omitempty"`
+	AlbumPrimaryImageTag string            `json:"AlbumPrimaryImageTag,omitempty"`
 }
 
 type nameIDDTO struct {
@@ -421,7 +425,9 @@ func (c *Client) Tracks(albumID string) ([]Track, error) {
 
 	out := make([]Track, 0, len(resp.Items))
 	for _, it := range resp.Items {
-		out = append(out, trackFromItem(it))
+		t := trackFromItem(it)
+		t.ArtURL = c.itemArtURL(it)
+		out = append(out, t)
 	}
 	return out, nil
 }
@@ -454,7 +460,9 @@ func (c *Client) Search(query string, limit int) ([]Track, error) {
 
 	out := make([]Track, 0, len(resp.Items))
 	for _, it := range resp.Items {
-		out = append(out, trackFromItem(it))
+		t := trackFromItem(it)
+		t.ArtURL = c.itemArtURL(it)
+		out = append(out, t)
 	}
 	return out, nil
 }
@@ -487,6 +495,27 @@ func (c *Client) StreamURL(itemID string) string {
 		u += "?" + enc
 	}
 	return u
+}
+
+// itemArtURL returns an authenticated Primary-image URL for a track item,
+// preferring the track's own cover and falling back to its album's. Returns ""
+// when no tagged image is available. maxWidth=300 keeps the download small; the
+// api_key query makes the URL self-authenticating for later fetches.
+func (c *Client) itemArtURL(it itemDTO) string {
+	id, tag := it.ID, it.ImageTags["Primary"]
+	if tag == "" {
+		id, tag = it.AlbumID, it.AlbumPrimaryImageTag
+	}
+	if id == "" || tag == "" {
+		return ""
+	}
+	_ = c.ensureAuth()
+	v := url.Values{
+		"tag":      {tag},
+		"maxWidth": {"300"},
+		"api_key":  {c.authToken()},
+	}
+	return c.baseURL + path.Join("/", "Items", id, "Images", "Primary") + "?" + v.Encode()
 }
 
 func (c *Client) ReportNowPlaying(track playlist.Track, position time.Duration, canSeek bool) error {

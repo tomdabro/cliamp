@@ -20,10 +20,11 @@ const trackInfoMarqueeWidth = 48
 
 // Pre-built styles for elements created per-render to avoid repeated allocation.
 var (
-	seekFillStyle = lipgloss.NewStyle().Foreground(ui.ColorSeekBar)
-	seekDimStyle  = lipgloss.NewStyle().Foreground(ui.ColorDim)
-	volBarStyle   = lipgloss.NewStyle().Foreground(ui.ColorVolume)
-	activeToggle  = lipgloss.NewStyle().Foreground(ui.ColorAccent).Bold(true)
+	seekFillStyle         = lipgloss.NewStyle().Foreground(ui.ColorSeekBar)
+	seekDimStyle          = lipgloss.NewStyle().Foreground(ui.ColorDim)
+	volBarStyle           = lipgloss.NewStyle().Foreground(ui.ColorVolume)
+	activeToggle          = lipgloss.NewStyle().Foreground(ui.ColorAccent).Bold(true)
+	coverPlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorDim)
 	// favMarkerStyle paints the favorite heart in the theme's red so it
 	// reads as a deliberate accent instead of inheriting the dim/unavailable
 	// look. The glyph carries U+FE0E (text presentation) so terminals render
@@ -247,9 +248,7 @@ func (m Model) mainSections(playlist string, includeTransient, contentFirst bool
 			}
 		default:
 			sections = []string{
-				m.renderTitle(),
-				m.renderTrackInfo(),
-				m.renderTimeStatus(),
+				m.renderNowPlayingHeader(),
 				"",
 				m.renderSpectrum(),
 				m.renderSeekBar(),
@@ -500,6 +499,50 @@ func (m Model) renderTimeStatus() string {
 	gap := max(ui.PanelWidth-lipgloss.Width(left)-lipgloss.Width(status), 1)
 
 	return left + strings.Repeat(" ", gap) + status
+}
+
+// renderNowPlayingHeader renders the title / track info / time-status stack.
+// When the album cover is shown it places the cover to the left of a narrowed
+// metadata column; otherwise it returns the three lines stacked full-width.
+func (m Model) renderNowPlayingHeader() string {
+	stack := func() string {
+		return lipgloss.JoinVertical(lipgloss.Left, m.renderTitle(), m.renderTrackInfo(), m.renderTimeStatus())
+	}
+	if !m.cover.shown {
+		return stack()
+	}
+	rightW := max(1, m.layout.panelWidth-m.cover.cols-coverGap)
+	prev := ui.PanelWidth
+	ui.PanelWidth = rightW
+	right := stack()
+	ui.PanelWidth = prev
+	return lipgloss.JoinHorizontal(lipgloss.Top, m.renderCoverColumn(), strings.Repeat(" ", coverGap), right)
+}
+
+// renderCoverColumn returns the album cover as a cover.cols × cover.rows block,
+// or a dim placeholder while loading, missing, or on failure.
+func (m Model) renderCoverColumn() string {
+	if m.cover.rendered != "" {
+		return m.cover.rendered
+	}
+	glyph := "♪"
+	if m.cover.loading {
+		glyph = "…"
+	}
+	w, h := m.cover.cols, m.cover.rows
+	lines := make([]string, h)
+	mid := h / 2
+	for i := range h {
+		if i == mid {
+			pad := max(0, (w-lipgloss.Width(glyph))/2)
+			line := strings.Repeat(" ", pad) + glyph
+			line += strings.Repeat(" ", max(0, w-lipgloss.Width(line)))
+			lines[i] = line
+		} else {
+			lines[i] = strings.Repeat(" ", w)
+		}
+	}
+	return coverPlaceholderStyle.Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderSpectrum() string {

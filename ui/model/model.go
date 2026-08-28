@@ -282,6 +282,7 @@ type Model struct {
 	themePicker    themePickerState
 	visPicker      visPickerState
 	lyrics         lyricsState
+	cover          coverState
 	keymap         keymapOverlay
 	queue          queueOverlay
 	plManager      plManagerState
@@ -293,6 +294,7 @@ type Model struct {
 	radioStats     radioStatsState
 	ytdlBatch      ytdlBatchState
 	reconnect      reconnectState
+	preloadFail    preloadFailState
 	save           saveState
 	status         statusMsg
 	logLines       []logLine

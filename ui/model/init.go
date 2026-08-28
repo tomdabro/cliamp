@@ -8,6 +8,7 @@ import (
 
 	"github.com/bjarneo/cliamp/favorites"
 	"github.com/bjarneo/cliamp/history"
+	"github.com/bjarneo/cliamp/internal/coverart"
 	"github.com/bjarneo/cliamp/luaplugin"
 	"github.com/bjarneo/cliamp/player"
 	"github.com/bjarneo/cliamp/playlist"
@@ -113,6 +114,35 @@ func (m *Model) SetSimplified(v bool) {
 	}
 	m.refreshChrome()
 	m.normalizeMainFocus()
+}
+
+// SetAlbumArtHeight configures the album-cover height in terminal rows for the
+// full-layout now-playing header. 0 disables the cover; positive values also
+// derive the cell width (2*rows) and enable the cover by default.
+func (m *Model) SetAlbumArtHeight(rows int) {
+	if rows <= 0 {
+		m.cover.rows = 0
+		m.cover.cols = 0
+		m.cover.visible = false
+		return
+	}
+	m.cover.rows = rows
+	m.cover.cols = rows * 2
+	m.cover.visible = true
+}
+
+// SetAlbumArtProtocol selects the cover rendering protocol: "kitty" forces the
+// Kitty graphics protocol, "blocks" forces half-block text, and anything else
+// ("auto") detects Kitty/Ghostty/WezTerm support from the environment.
+func (m *Model) SetAlbumArtProtocol(p string) {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "kitty", "graphics":
+		m.cover.kitty = true
+	case "blocks", "block", "halfblocks", "text":
+		m.cover.kitty = false
+	default:
+		m.cover.kitty = coverart.KittySupported()
+	}
 }
 
 // SetInitialDirectory sets the initial directory for the file browser.

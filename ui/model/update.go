@@ -672,6 +672,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case coverLoadedMsg:
+		if msg.gen != m.requests.cover || msg.url != m.cover.url {
+			return m, nil
+		}
+		m.cover.loading = false
+		if msg.err != nil {
+			m.cover.failed = true
+			m.cover.rendered = ""
+		} else {
+			m.cover.failed = false
+			m.cover.rendered = msg.rendered
+			if msg.transmit != "" {
+				return m, tea.Raw(msg.transmit)
+			}
+		}
+		return m, nil
+
 	case fbTracksResolvedMsg:
 		if len(msg.tracks) == 0 {
 			m.status.Warning("No audio files found", statusTTLDefault)
@@ -755,6 +772,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.preloading = false
+		if msg.err == nil {
+			if msg.path == m.preloadFail.path {
+				m.preloadFail = preloadFailState{}
+			}
+			return m, nil
+		}
+		// Preload failed (e.g. Spotify session auth error). Back off with the
+		// same exponential schedule as stream reconnects and give up after 5
+		// consecutive failures for this next-track path, instead of retrying
+		// on every tick — that turned a stale provider session into an
+		// unthrottled retry storm that hammered the auth endpoint and spammed
+		// the footer. Playback still falls back to non-gapless at the track
+		// boundary once preload has given up.
+		if msg.path != m.preloadFail.path {
+			m.preloadFail = preloadFailState{path: msg.path}
+		}
+		if m.preloadFail.attempts < 5 {
+			m.preloadFail.at = time.Now().Add(time.Second << m.preloadFail.attempts)
+			m.preloadFail.attempts++
+		}
 		return m, nil
 
 	case ytdlSavedMsg:

@@ -461,6 +461,7 @@ type subsonicSong struct {
 	TrackNumber int    `json:"track"`
 	Genre       string `json:"genre"`
 	Duration    int    `json:"duration"`
+	CoverArt    string `json:"coverArt"`
 }
 
 func (c *NavidromeClient) songToTrack(s subsonicSong) playlist.Track {
@@ -475,6 +476,7 @@ func (c *NavidromeClient) songToTrack(s subsonicSong) playlist.Track {
 		Stream:       true,
 		DurationSecs: s.Duration,
 		ProviderMeta: map[string]string{provider.MetaNavidromeID: s.ID},
+		AlbumArtURL:  c.coverArtURL(s.CoverArt),
 	}
 }
 
@@ -508,6 +510,16 @@ func albumFromSubsonic(a subsonicAlbum) Album {
 // audio quality (FLAC, OPUS, AAC, MP3 — whatever is stored).
 func (c *NavidromeClient) streamURL(id string) string {
 	return c.buildURL("stream", url.Values{"id": {id}, "format": {"raw"}})
+}
+
+// coverArtURL builds an authenticated getCoverArt URL for a cover art ID.
+// size=300 keeps the download small; the URL is self-authenticating (u/t/s),
+// so it can be fetched later without client context (e.g. by MPRIS).
+func (c *NavidromeClient) coverArtURL(id string) string {
+	if id == "" {
+		return ""
+	}
+	return c.buildURL("getCoverArt", url.Values{"id": {id}, "size": {"300"}})
 }
 
 func (c *NavidromeClient) CanReportPlayback(track playlist.Track) bool {

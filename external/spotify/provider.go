@@ -357,6 +357,9 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 		}
 
 		if err != nil {
+			if strings.Contains(err.Error(), "403") {
+				return nil, fmt.Errorf("spotify: playlist not accessible (403): its tracks could not be listed")
+			}
 			return nil, fmt.Errorf("spotify: list tracks: %w", err)
 		}
 

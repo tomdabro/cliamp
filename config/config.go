@@ -330,6 +330,8 @@ type Config struct {
 	Simplified       bool                         // simplified playback view: track summary and time strip
 	PaddingH         int                          // horizontal padding for the UI frame (default 3)
 	PaddingV         int                          // vertical padding for the UI frame (default 1)
+	AlbumArtHeight   int                          // album cover height in terminal rows on the full layout; 0 disables (default 7)
+	AlbumArtProtocol string                       // cover render protocol: "auto" (default), "kitty", or "blocks"
 	AudioDevice      string                       // preferred audio output device name (empty = system default)
 	Playlist         string                       // local TOML playlist name to load on startup
 	InitialDirectory string                       // initial directory for the file browser
@@ -357,21 +359,23 @@ type Config struct {
 // that require a specific rate (commonly 48 kHz) work out of the box.
 func defaultConfig() Config {
 	return Config{
-		VolumeMin:       -50,
-		VisVolumeLinked: true,
-		Repeat:          "off",
-		AutoPlay:        false,
-		Speed:           1.0,
-		SeekStepLarge:   30,
-		SampleRate:      0,
-		BufferMs:        250,
-		ResampleQuality: 4,
-		BitDepth:        16,
-		PaddingH:        3,
-		PaddingV:        1,
-		Spotify:         SpotifyConfig{Bitrate: 320},
-		Qobuz:           QobuzConfig{Quality: 6},
-		LogLevel:        "info",
+		VolumeMin:        -50,
+		VisVolumeLinked:  true,
+		Repeat:           "off",
+		AutoPlay:         false,
+		Speed:            1.0,
+		SeekStepLarge:    30,
+		SampleRate:       0,
+		BufferMs:         250,
+		ResampleQuality:  4,
+		BitDepth:         16,
+		PaddingH:         3,
+		PaddingV:         1,
+		AlbumArtHeight:   7,
+		AlbumArtProtocol: "auto",
+		Spotify:          SpotifyConfig{Bitrate: 320},
+		Qobuz:            QobuzConfig{Quality: 6},
+		LogLevel:         "info",
 	}
 }
 
@@ -687,6 +691,12 @@ func Load() (Config, error) {
 				if v, err := strconv.Atoi(val); err == nil {
 					cfg.PaddingV = v
 				}
+			case "album_art_height":
+				if v, err := strconv.Atoi(val); err == nil {
+					cfg.AlbumArtHeight = v
+				}
+			case "album_art_protocol":
+				cfg.AlbumArtProtocol = parseString(val)
 			case "log_level":
 				lvl := strings.ToLower(parseString(val))
 				switch lvl {

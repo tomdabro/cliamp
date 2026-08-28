@@ -83,6 +83,19 @@ low_power = false
 # No visualizer or playback controls are shown.
 simplified = false
 
+# Album cover height in terminal rows, shown beside the now-playing header on
+# the full (80x24+) layout. Width is derived automatically (2x the height).
+# Set to 0 to disable album art entirely. Range 3-20 (default 7).
+# Toggle at runtime with Ctrl+A.
+album_art_height = 7
+
+# Album art rendering protocol:
+#   "auto"   - use the Kitty graphics protocol on Kitty/Ghostty/WezTerm for a
+#              crisp image, otherwise colored half-blocks (default)
+#   "kitty"  - force the Kitty graphics protocol
+#   "blocks" - force half-block text (works on any truecolor terminal)
+album_art_protocol = "auto"
+
 # UI theme name (see available themes in ~/.config/cliamp/themes/)
 theme = "Tokyo Night"
 
@@ -114,6 +127,27 @@ List views such as provider browsing, file selection, queues, playlists, search
 results, themes, and keybindings use a content-first layout. This layout replaces
 the visualizer and detailed controls with a compact now-playing summary. It leaves
 more rows for navigation. The visualizer picker keeps its live preview.
+
+## Album Art
+
+On the full (80x24+) layout, the currently playing track's album cover renders
+beside the now-playing header, to the left of the title, artist, and time. The
+spectrum visualizer stays full-width below it. Set `album_art_height` (rows;
+width is derived as `2x`) or `0` to disable, and toggle at runtime with `Ctrl+A`.
+
+Rendering uses one of two paths, chosen by `album_art_protocol`:
+
+- **Kitty graphics** (`auto` on Kitty, Ghostty, and WezTerm, or forced with
+  `kitty`) draws a real, crisp image using the terminal's graphics protocol.
+- **Half-blocks** (`auto` elsewhere, or forced with `blocks`) draws the cover
+  with colored `▀` characters. This works on any truecolor terminal but is
+  low-resolution (one cell = one horizontal pixel, two vertical), so it looks
+  pixelated at small sizes — increase `album_art_height` for more detail.
+
+Cover art is sourced per provider: local files use embedded tags, and Spotify,
+Navidrome, Plex, Jellyfin, Emby, and YouTube Music supply cover URLs from their
+APIs. The same artwork is published to MPRIS / macOS Now Playing. Downloaded
+covers are cached under `~/.local/share/cliamp/cover-cache/`.
 
 ## Secrets from Environment Variables
 

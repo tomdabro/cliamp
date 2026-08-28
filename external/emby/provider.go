@@ -195,6 +195,7 @@ func (p *Provider) toPlaylistTracks(embyTracks []Track) []playlist.Track {
 			DurationSecs: t.DurationSecs,
 			Stream:       true,
 			ProviderMeta: map[string]string{provider.MetaEmbyID: t.ID},
+			AlbumArtURL:  t.ArtURL,
 		})
 	}
 	return out

@@ -183,6 +183,7 @@ func (p *Provider) toPlaylistTracks(jfTracks []Track) []playlist.Track {
 			DurationSecs: t.DurationSecs,
 			Stream:       true,
 			ProviderMeta: map[string]string{provider.MetaJellyfinID: t.ID},
+			AlbumArtURL:  t.ArtURL,
 		})
 	}
 	return out

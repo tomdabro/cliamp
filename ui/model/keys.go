@@ -873,6 +873,20 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.fullVis = !m.fullVis
 		m.recomputeLayout()
 
+	case "ctrl+a":
+		if m.cover.rows > 0 {
+			m.cover.visible = !m.cover.visible
+			var cmd tea.Cmd
+			if m.cover.visible {
+				if track, idx := m.currentPlaybackTrack(); idx >= 0 {
+					cmd = m.loadCoverForTrack(track)
+				}
+			}
+			m.recomputeLayout()
+			m.adjustScroll()
+			return cmd
+		}
+
 	case "ctrl+x":
 		if !m.simplified && m.focus == focusPlaylist {
 			m.toggleExpandedView()

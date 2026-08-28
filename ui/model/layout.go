@@ -11,6 +11,16 @@ const (
 	layoutFull
 )
 
+// coverHeaderRows is the number of stacked now-playing lines (title, track
+// info, time/status) the cover column sits beside; only cover height beyond
+// this pushes content down. coverGap and coverMinRightWidth guard against
+// squeezing the metadata column too narrow.
+const (
+	coverHeaderRows    = 3
+	coverGap           = 2
+	coverMinRightWidth = 40
+)
+
 type frameLayout struct {
 	tier               layoutTier
 	frameWidth         int
@@ -74,6 +84,15 @@ func (m *Model) recomputeLayout() {
 	} else if simplified {
 		layout.visualizerRows = 0
 		layout.fixedRows = 3
+	}
+
+	m.cover.shown = false
+	if m.cover.rows > 0 && m.cover.visible && layout.tier == layoutFull && !contentFirst &&
+		layout.panelWidth >= m.cover.cols+coverGap+coverMinRightWidth {
+		m.cover.shown = true
+		if extra := m.cover.rows - coverHeaderRows; extra > 0 {
+			layout.fixedRows += extra
+		}
 	}
 
 	layout.fullVisualizerRows = max(1, height-6-2*paddingV)

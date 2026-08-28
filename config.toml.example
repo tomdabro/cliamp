@@ -50,6 +50,15 @@ eq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 # No visualizer or playback controls are shown.
 # simplified = true
 
+# Album cover height in terminal rows, shown beside the now-playing header on
+# the full (80x24+) layout; width is derived as 2x. Set to 0 to disable.
+# Toggle at runtime with Ctrl+A. (default: 7)
+# album_art_height = 7
+
+# Album art rendering: "auto" (Kitty graphics on Kitty/Ghostty/WezTerm, else
+# half-blocks), "kitty" (force graphics), or "blocks" (force half-block text).
+# album_art_protocol = "auto"
+
 # UI theme name (check ~/.config/cliamp/themes/ for available themes)
 # theme = "Tokyo Night"
 

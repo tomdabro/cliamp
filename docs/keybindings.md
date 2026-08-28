@@ -63,6 +63,7 @@ fields support these editor keys:
 | `v` | Cycle visualizer |
 | `Ctrl+V` | Pick visualizer from a list (live preview) |
 | `V` | Full screen visualizer |
+| `Ctrl+A` | Toggle album art (full layout, truecolor terminals) |
 | `Ctrl+H` | Toggle album headers |
 
 Theme and visualizer pickers support `/` filtering. While you browse, arrow

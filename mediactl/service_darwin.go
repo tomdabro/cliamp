@@ -45,6 +45,19 @@ static void clearNowPlaying(void) {
 	[MPNowPlayingInfoCenter defaultCenter].playbackState = MPNowPlayingPlaybackStateStopped;
 }
 
+static void setArtwork(NSImage *image, NSMutableDictionary *info) {
+	MPMediaItemArtwork *artwork = [[[MPMediaItemArtwork alloc] initWithBoundsSize:image.size
+		requestHandler:^NSImage * _Nonnull(CGSize size) {
+			return image;
+		}] autorelease];
+	info[MPMediaItemPropertyArtwork] = artwork;
+}
+
+// Remote artwork is fetched off the run loop by Go (net/http, never CFNetwork)
+// and decoded into an NSImage cache defined in artwork_darwin.go. The run loop
+// only reads the cache, so it never blocks on the network.
+extern NSImage *cachedRemoteArtwork(NSURL *url);
+
 static MediaCtlBridgeRef bridgeCreate(uintptr_t handle) {
 	MediaCtlBridge *bridge = (MediaCtlBridge *)calloc(1, sizeof(MediaCtlBridge));
 	if (!bridge) {
@@ -141,17 +154,24 @@ static void updateNowPlaying(const char *title, const char *artist, const char *
 		if (title)  info[MPMediaItemPropertyTitle] = @(title);
 		if (artist) info[MPMediaItemPropertyArtist] = @(artist);
 		if (album)  info[MPMediaItemPropertyAlbumTitle] = @(album);
-		if (artURL) {
-			// cliamp only passes local file:// artwork URLs here. Avoid extending
-			// this path to remote artwork without moving image loading off-thread.
+		if (artURL && artURL[0]) {
 			NSURL *url = [NSURL URLWithString:@(artURL)];
-			NSImage *image = url ? [[[NSImage alloc] initWithContentsOfURL:url] autorelease] : nil;
-			if (image) {
-				MPMediaItemArtwork *artwork = [[[MPMediaItemArtwork alloc] initWithBoundsSize:image.size
-					requestHandler:^NSImage * _Nonnull(CGSize size) {
-						return image;
-					}] autorelease];
-				info[MPMediaItemPropertyArtwork] = artwork;
+			if (url) {
+				NSString *scheme = [[url scheme] lowercaseString];
+				if ([scheme isEqualToString:@"file"]) {
+					// Local files: synchronous decode on the run loop is fine.
+					NSImage *image = [[[NSImage alloc] initWithContentsOfURL:url] autorelease];
+					if (image) {
+						setArtwork(image, info);
+					}
+				} else if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) {
+					// Remote artwork is fetched off-thread by Go and cached;
+					// the run loop never touches the network for it.
+					NSImage *cached = cachedRemoteArtwork(url);
+					if (cached) {
+						setArtwork(cached, info);
+					}
+				}
 			}
 		}
 		if (durationSecs > 0) info[MPMediaItemPropertyPlaybackDuration] = @(durationSecs);
@@ -516,6 +536,9 @@ func applyUpdate(req updateReq) {
 	if req.artURL != "" {
 		cArtURL = C.CString(req.artURL)
 		defer C.free(unsafe.Pointer(cArtURL))
+	}
+	if isRemoteArtURL(req.artURL) {
+		scheduleRemoteArtwork(req.artURL)
 	}
 	canSeek := C.int(0)
 	if req.canSeek {

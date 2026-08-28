@@ -401,6 +401,8 @@ func run(overrides config.Overrides, positional []string, daemon, visualizer60FP
 	m.SetCustomEQBands(cfg.EQ)
 	m.SetVisVolumeLinked(cfg.VisVolumeLinked)
 	m.SetVisualizer60FPS(visualizer60FPS)
+	m.SetAlbumArtHeight(cfg.AlbumArtHeight)
+	m.SetAlbumArtProtocol(cfg.AlbumArtProtocol)
 
 	if luaMgr != nil {
 		luaMgr.SetStateProvider(luaplugin.StateProvider{

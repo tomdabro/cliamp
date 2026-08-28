@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/bjarneo/cliamp/internal/coverart"
 	"github.com/bjarneo/cliamp/playlist"
 	"github.com/bjarneo/cliamp/provider"
 )
@@ -469,8 +470,10 @@ func (m *Model) beginPlaybackTrack(track playlist.Track) (playlist.Track, tea.Cm
 	track = playlist.RefreshEmbeddedMetadata(track)
 	m.setPlaybackTrack(track)
 	historyCmd := m.recordListenedTrack(track)
+	coverCmd := m.loadCoverForTrack(track)
 	m.reconnect.attempts = 0
 	m.reconnect.at = time.Time{}
+	m.preloadFail = preloadFailState{}
 	m.streamTitle = ""
 	m.lyrics.lines = nil
 	m.lyrics.err = nil
@@ -487,14 +490,57 @@ func (m *Model) beginPlaybackTrack(track playlist.Track) (playlist.Track, tea.Cm
 	if m.lyrics.visible {
 		q := lyricsLookupKey(track, track.Artist, track.Title)
 		if q == "" {
-			return track, historyCmd
+			return track, tea.Batch(historyCmd, coverCmd)
 		}
 		m.lyrics.loading = true
 		m.lyrics.query = q
-		return track, tea.Batch(historyCmd, m.fetchLyricsForTrack(track, track.Artist, track.Title))
+		return track, tea.Batch(historyCmd, coverCmd, m.fetchLyricsForTrack(track, track.Artist, track.Title))
 	}
 	m.lyrics.loading = false
-	return track, historyCmd
+	return track, tea.Batch(historyCmd, coverCmd)
+}
+
+// loadCoverForTrack updates cover state for a new track and returns a command
+// to fetch+render its art, or nil when the feature is disabled, the art URL is
+// unchanged, or the track carries no art (a placeholder shows instead).
+func (m *Model) loadCoverForTrack(track playlist.Track) tea.Cmd {
+	if m.cover.rows <= 0 || !m.cover.visible {
+		return nil
+	}
+	url := track.AlbumArtURL
+	if url == m.cover.url && (m.cover.rendered != "" || m.cover.loading) {
+		return nil
+	}
+	m.cover.url = url
+	m.cover.rendered = ""
+	m.cover.failed = false
+	if url == "" {
+		m.cover.loading = false
+		return nil
+	}
+	m.cover.loading = true
+	req := coverRequest{
+		url:  url,
+		cols: m.cover.cols,
+		rows: m.cover.rows,
+		gen:  nextRequest(&m.requests.cover),
+	}
+	if m.cover.kitty {
+		req.kitty = true
+		req.prevID = m.cover.kittyID
+		m.cover.kittyID = nextKittyID(m.cover.kittyID)
+		req.id = m.cover.kittyID
+	}
+	return fetchCoverCmd(req)
+}
+
+// nextKittyID returns the next Kitty image id in the 24-bit range [1, MaxKittyID],
+// which is what a Unicode-placeholder foreground color can encode.
+func nextKittyID(cur uint32) uint32 {
+	if cur >= coverart.MaxKittyID {
+		return 1
+	}
+	return cur + 1
 }
 
 func (m *Model) fetchLyricsForTrack(track playlist.Track, artist, title string) tea.Cmd {

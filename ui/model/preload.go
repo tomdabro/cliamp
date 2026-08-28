@@ -64,6 +64,15 @@ func (m *Model) preloadNext() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	// A prior preload attempt for this exact next-track path is backing off
+	// (or has given up after repeated failures, e.g. a stale provider auth
+	// session). Skip until the path changes or the backoff window elapses —
+	// otherwise every tick would retry immediately, hammering the provider.
+	if next.Path == m.preloadFail.path {
+		if m.preloadFail.attempts >= 5 || time.Now().Before(m.preloadFail.at) {
+			return nil
+		}
+	}
 	isYTDL := playlist.IsYTDL(next.Path)
 	if isYTDL && currentIdx >= 0 && next.Path == current.Path {
 		return nil

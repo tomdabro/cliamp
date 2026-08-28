@@ -99,3 +99,37 @@ func TestTrackFromItem(t *testing.T) {
 		}
 	})
 }
+
+// TestPickAlbumArt verifies cover selection: the smallest image at least
+// coverArtMinWidth wide, falling back to the largest when none qualify.
+func TestPickAlbumArt(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []spotifyImage
+		want   string
+	}{
+		{"none", nil, ""},
+		{
+			"prefers smallest >= min",
+			[]spotifyImage{{URL: "big", Width: 640}, {URL: "mid", Width: 300}, {URL: "tiny", Width: 64}},
+			"mid",
+		},
+		{
+			"falls back to largest when all below min",
+			[]spotifyImage{{URL: "a", Width: 64}, {URL: "b", Width: 120}},
+			"b",
+		},
+		{
+			"skips empty URLs",
+			[]spotifyImage{{URL: "", Width: 300}, {URL: "ok", Width: 320}},
+			"ok",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickAlbumArt(tt.images); got != tt.want {
+				t.Errorf("pickAlbumArt() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

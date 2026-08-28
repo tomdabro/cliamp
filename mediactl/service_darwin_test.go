@@ -119,3 +119,24 @@ func TestDarwinUpdateCoalescesPendingState(t *testing.T) {
 	default:
 	}
 }
+func TestIsRemoteArtURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"empty", "", false},
+		{"local file", "file:///tmp/cover.jpg", false},
+		{"http", "http://example.com/cover.jpg", true},
+		{"https", "https://example.com/cover.jpg", true},
+		{"uppercase scheme", "HTTPS://example.com/cover.jpg", false},
+		{"ftp not remote", "ftp://example.com/cover.jpg", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRemoteArtURL(tt.url); got != tt.want {
+				t.Fatalf("isRemoteArtURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}

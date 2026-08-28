@@ -125,10 +125,8 @@ On macOS, cliamp publishes now-playing information to the system MPNowPlayingInf
 - Hardware media keys (play/pause, next, previous)
 - Bluetooth headphone buttons
 
-Local files with embedded cover art publish that art to Control Centre and Lock
-Screen media controls. cliamp caches art by content in
-`~/.local/share/cliamp/album-art/`. It removes cached art as needed to keep the
-cache near 100 MB.
+Local files with embedded cover art publish that artwork to Control Centre and Lock Screen media controls. Remote providers (Spotify, Navidrome, Plex, Jellyfin, Emby, YouTube Music) publish cover URLs from their APIs the same way. Embedded artwork is cached by content under `~/.local/share/cliamp/album-art/` and pruned opportunistically to stay around 100 MB.
+Remote artwork URLs are fetched once in the background (never on the Cocoa run loop) and cached in memory, so repeated now-playing updates do not re-download covers or stall the media-control thread on the network.
 
 The macOS media-control runtime pins the main goroutine to thread 0 with
 `runtime.LockOSThread`. This lets the Cocoa run loop process events. Bubbletea

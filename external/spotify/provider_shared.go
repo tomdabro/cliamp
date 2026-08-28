@@ -45,19 +45,56 @@ type spotifyItem struct {
 	URI     string          `json:"uri"`  // canonical spotify:track:... / spotify:episode:...
 	Artists []spotifyArtist `json:"artists"`
 	Album   struct {
-		Name        string `json:"name"`
-		ReleaseDate string `json:"release_date"`
+		Name        string         `json:"name"`
+		ReleaseDate string         `json:"release_date"`
+		Images      []spotifyImage `json:"images"`
 	} `json:"album"`
 	Show struct {
-		Name string `json:"name"`
+		Name   string         `json:"name"`
+		Images []spotifyImage `json:"images"`
 	} `json:"show"`
-	ReleaseDate  string `json:"release_date"` // episodes carry this at top level
-	DurationMs   int    `json:"duration_ms"`
-	TrackNumber  int    `json:"track_number"`
-	IsPlayable   *bool  `json:"is_playable"`
+	Images       []spotifyImage `json:"images"`
+	ReleaseDate  string         `json:"release_date"` // episodes carry this at top level
+	DurationMs   int            `json:"duration_ms"`
+	TrackNumber  int            `json:"track_number"`
+	IsPlayable   *bool          `json:"is_playable"`
 	Restrictions struct {
 		Reason string `json:"reason"`
 	} `json:"restrictions"`
+}
+
+// spotifyImage is a cover image entry from album/episode/show objects.
+type spotifyImage struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// coverArtMinWidth is the smallest source-image width preferred for the
+// terminal cover thumbnail. Spotify typically offers 640/300/64; this picks
+// the 300px image, keeping downloads small while leaving headroom to downscale.
+const coverArtMinWidth = 160
+
+// pickAlbumArt chooses a cover URL for terminal display: the smallest image at
+// least coverArtMinWidth wide, falling back to the largest available.
+func pickAlbumArt(images []spotifyImage) string {
+	var smallestOK, largest string
+	var smallestOKW, largestW int
+	for _, img := range images {
+		if img.URL == "" {
+			continue
+		}
+		if largest == "" || img.Width > largestW {
+			largest, largestW = img.URL, img.Width
+		}
+		if img.Width >= coverArtMinWidth && (smallestOK == "" || img.Width < smallestOKW) {
+			smallestOK, smallestOKW = img.URL, img.Width
+		}
+	}
+	if smallestOK != "" {
+		return smallestOK
+	}
+	return largest
 }
 
 // spotifyAlbumItem is a simplified album object from the Spotify Web API, as
@@ -123,9 +160,13 @@ func trackFromItem(t *spotifyItem) playlist.Track {
 	}
 	artist := strings.Join(artists, ", ")
 	album := t.Album.Name
+	art := pickAlbumArt(t.Album.Images)
 	if t.Type == "episode" {
 		artist = t.Show.Name
 		album = t.Show.Name
+		if art = pickAlbumArt(t.Images); art == "" {
+			art = pickAlbumArt(t.Show.Images)
+		}
 	}
 
 	releaseDate := t.Album.ReleaseDate
@@ -153,6 +194,7 @@ func trackFromItem(t *spotifyItem) playlist.Track {
 		Stream:       false, // must be false: true causes togglePlayPause to stop+restart instead of pause/resume
 		DurationSecs: t.DurationMs / 1000,
 		TrackNumber:  t.TrackNumber,
+		AlbumArtURL:  art,
 		Unplayable:   (t.IsPlayable != nil && !*t.IsPlayable) || t.Restrictions.Reason != "",
 	}
 }
