@@ -73,3 +73,63 @@ func TestPlaylistsIncludesFollowedPlaylists(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshInvalidatesPlaylistListCache(t *testing.T) {
+	originalTransport := http.DefaultTransport
+	calls := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body string
+		switch req.URL.Path {
+		case "/v1/me":
+			body = `{"id":"me"}`
+		case "/v1/me/tracks":
+			body = `{"total":0}`
+		case "/v1/me/playlists":
+			calls++
+			body = fmt.Sprintf(`{"items":[{"id":"p%d","name":"P%d","snapshot_id":"s","owner":{"id":"me"},"items":{"total":0}}],"total":1}`, calls, calls)
+		default:
+			return nil, fmt.Errorf("unexpected Spotify API path %q", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	sess := &Session{tokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token"})}
+	p := New(sess, "client", 320)
+
+	first, err := p.Playlists()
+	if err != nil {
+		t.Fatalf("Playlists() error: %v", err)
+	}
+	if len(first) != 2 || first[1].ID != "p1" {
+		t.Fatalf("first Playlists() = %+v, want a single p1 playlist", first)
+	}
+
+	// Within the cache TTL, a second call must not hit the API again -- a
+	// newly followed/pinned playlist would silently stay invisible.
+	cached, err := p.Playlists()
+	if err != nil {
+		t.Fatalf("cached Playlists() error: %v", err)
+	}
+	if calls != 1 || cached[1].ID != "p1" {
+		t.Fatalf("expected the cache to serve the second call: calls=%d, got=%+v", calls, cached)
+	}
+
+	// Refresh() must invalidate that cache -- this is what the "r" key
+	// relies on (playlist.Refresher) to actually pick up changes made in
+	// Spotify while cliamp was already running.
+	p.Refresh()
+	refreshed, err := p.Playlists()
+	if err != nil {
+		t.Fatalf("Playlists() after Refresh error: %v", err)
+	}
+	if calls != 2 || refreshed[1].ID != "p2" {
+		t.Fatalf("expected Refresh() to force a re-fetch: calls=%d, got=%+v", calls, refreshed)
+	}
+}

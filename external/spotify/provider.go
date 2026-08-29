@@ -32,6 +32,7 @@ var (
 	_ provider.PlaylistCreator = (*SpotifyProvider)(nil)
 	_ provider.CustomStreamer  = (*SpotifyProvider)(nil)
 	_ provider.Closer          = (*SpotifyProvider)(nil)
+	_ playlist.Refresher       = (*SpotifyProvider)(nil)
 )
 
 // maxResponseBody limits JSON API responses to 10 MB.
@@ -159,6 +160,24 @@ func (p *SpotifyProvider) Close() {
 func (p *SpotifyProvider) resetSessionScopedStateLocked() {
 	p.userID = ""
 	p.meFetched = false
+}
+
+// Refresh invalidates the cached playlist list so the next Playlists() call
+// re-fetches from the Spotify Web API instead of returning what's cached for
+// up to playlistListCacheTTL. Without this, SpotifyProvider didn't implement
+// playlist.Refresher at all, so the "r" refresh key silently did nothing for
+// up to 5 minutes -- a playlist followed/pinned in Spotify while cliamp was
+// already running wouldn't appear even after an explicit refresh.
+//
+// trackCache is deliberately left alone: it's already invalidated per-playlist
+// by snapshot_id comparison in Playlists(), a more precise mechanism than a
+// blanket clear would be.
+// Implements playlist.Refresher.
+func (p *SpotifyProvider) Refresh() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.listCache = nil
+	p.listCacheAt = time.Time{}
 }
 
 func (p *SpotifyProvider) Name() string { return "Spotify" }
