@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/bjarneo/cliamp/applog"
+	"github.com/bjarneo/cliamp/atollplugin"
 	"github.com/bjarneo/cliamp/external/local"
 	"github.com/bjarneo/cliamp/history"
 	"github.com/bjarneo/cliamp/internal/playback"
@@ -64,8 +65,24 @@ func runDaemon(p *player.Player, pl *playlist.Playlist, localProv *local.Provide
 	}
 	if svc != nil {
 		defer svc.Close()
-		d.notifier = svc
 	}
+
+	atollSvc, atollErr := atollplugin.New()
+	if atollErr != nil {
+		applog.Warn("daemon: atoll plugin unavailable: %v", atollErr)
+	}
+	if atollSvc != nil {
+		defer atollSvc.Close()
+	}
+
+	var notifiers []playback.Notifier
+	if svc != nil {
+		notifiers = append(notifiers, svc)
+	}
+	if atollSvc != nil {
+		notifiers = append(notifiers, atollSvc)
+	}
+	d.notifier = playback.Multi(notifiers...)
 
 	if autoPlay && pl.Len() > 0 {
 		d.mu.Lock()

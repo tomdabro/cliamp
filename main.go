@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/bjarneo/cliamp/applog"
+	"github.com/bjarneo/cliamp/atollplugin"
 	"github.com/bjarneo/cliamp/config"
 	"github.com/bjarneo/cliamp/external/audiobookshelf"
 	"github.com/bjarneo/cliamp/external/emby"
@@ -520,11 +521,15 @@ func run(overrides config.Overrides, positional []string, daemon, visualizer60FP
 		defer tidal.SetAuthURLObserver(nil)
 	}
 
-	svc, svcErr := wireMediaCtl(prog)
+	mediaSvc, atollSvc, svcErr := wireMediaCtl(prog)
 	if svcErr != nil {
 		applog.Warn("media control (MPRIS/NowPlaying) unavailable: %v", svcErr)
-	} else if svc != nil {
-		defer svc.Close()
+	}
+	if mediaSvc != nil {
+		defer mediaSvc.Close()
+	}
+	if atollSvc != nil {
+		defer atollSvc.Close()
 	}
 
 	if luaMgr != nil {
@@ -577,7 +582,7 @@ func run(overrides config.Overrides, positional []string, daemon, visualizer60FP
 		go publishV2JobEvents(ipcSrv.Done(), ipcSrv.JobStore(), pluginBroker)
 	}
 
-	finalModel, err := mediactl.Run(prog, svc)
+	finalModel, err := mediactl.Run(prog, mediaSvc)
 	if err != nil {
 		return err
 	}
@@ -704,13 +709,28 @@ func initLogging(levelStr string) (func() error, string, error) {
 	return closeFn, level.String(), nil
 }
 
-func wireMediaCtl(prog *tea.Program) (*mediactl.Service, error) {
-	svc, err := mediactl.New(prog.Send)
-	if err != nil || svc == nil {
-		return svc, err
+func wireMediaCtl(prog *tea.Program) (*mediactl.Service, *atollplugin.Service, error) {
+	mediaSvc, err := mediactl.New(prog.Send)
+	if err != nil {
+		return nil, nil, err
 	}
-	go prog.Send(model.AttachNotifier(svc))
-	return svc, nil
+
+	atollSvc, atollErr := atollplugin.New()
+	if atollErr != nil {
+		applog.Warn("atoll plugin: %v", atollErr)
+	}
+
+	var notifiers []playback.Notifier
+	if mediaSvc != nil {
+		notifiers = append(notifiers, mediaSvc)
+	}
+	if atollSvc != nil {
+		notifiers = append(notifiers, atollSvc)
+	}
+	if notifier := playback.Multi(notifiers...); notifier != nil {
+		go prog.Send(model.AttachNotifier(notifier))
+	}
+	return mediaSvc, atollSvc, nil
 }
 
 // userIPCError renders ipc.ErrNotRunning as the wording users see. The ipc

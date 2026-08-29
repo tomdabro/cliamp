@@ -48,3 +48,38 @@ type Notifier interface {
 	Update(State)
 	Seeked(time.Duration)
 }
+
+// Multi fans Update/Seeked out to every non-nil notifier. Lets a caller
+// attach more than one Notifier (e.g. mediactl for MPRIS/NowPlaying and
+// atollplugin for Atoll) to the single playback.Notifier field on Model
+// and daemon.
+func Multi(notifiers ...Notifier) Notifier {
+	kept := make([]Notifier, 0, len(notifiers))
+	for _, n := range notifiers {
+		if n != nil {
+			kept = append(kept, n)
+		}
+	}
+	switch len(kept) {
+	case 0:
+		return nil
+	case 1:
+		return kept[0]
+	default:
+		return multiNotifier(kept)
+	}
+}
+
+type multiNotifier []Notifier
+
+func (m multiNotifier) Update(state State) {
+	for _, n := range m {
+		n.Update(state)
+	}
+}
+
+func (m multiNotifier) Seeked(position time.Duration) {
+	for _, n := range m {
+		n.Seeked(position)
+	}
+}

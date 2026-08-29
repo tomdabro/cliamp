@@ -95,3 +95,48 @@ func TestNotifierInterface(t *testing.T) {
 		t.Errorf("seeks = %v, want [1s]", f.seeks)
 	}
 }
+
+func TestMultiFansOutToEveryNotifier(t *testing.T) {
+	a, b := &fakeNotifier{}, &fakeNotifier{}
+	n := Multi(a, b)
+
+	n.Update(State{Status: StatusPlaying})
+	n.Seeked(2 * time.Second)
+
+	for i, f := range []*fakeNotifier{a, b} {
+		if len(f.updates) != 1 || f.updates[0].Status != StatusPlaying {
+			t.Errorf("notifier %d updates = %+v, want one Playing", i, f.updates)
+		}
+		if len(f.seeks) != 1 || f.seeks[0] != 2*time.Second {
+			t.Errorf("notifier %d seeks = %v, want [2s]", i, f.seeks)
+		}
+	}
+}
+
+func TestMultiSkipsNilNotifiers(t *testing.T) {
+	a := &fakeNotifier{}
+	n := Multi(a, nil)
+
+	n.Update(State{Status: StatusPaused})
+
+	if len(a.updates) != 1 {
+		t.Errorf("updates = %+v, want one entry", a.updates)
+	}
+}
+
+func TestMultiWithNoNotifiersReturnsNil(t *testing.T) {
+	if n := Multi(); n != nil {
+		t.Errorf("Multi() = %v, want nil", n)
+	}
+	if n := Multi(nil, nil); n != nil {
+		t.Errorf("Multi(nil, nil) = %v, want nil", n)
+	}
+}
+
+func TestMultiWithOneNotifierReturnsItUnwrapped(t *testing.T) {
+	a := &fakeNotifier{}
+	n := Multi(a)
+	if n != Notifier(a) {
+		t.Errorf("Multi(a) did not return a unwrapped")
+	}
+}
