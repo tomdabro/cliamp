@@ -78,6 +78,7 @@ func albumSpotify(t *testing.T, albumHits, trackHits, albumTracks int) (*Spotify
 				"uri":          "spotify:album:al0",
 				"release_date": "1994-07-19",
 				"artists":      []map[string]any{{"name": "NOFX"}},
+				"images":       []map[string]any{{"url": "https://i.scdn.co/image/pid", "width": 640, "height": 640}},
 			}
 
 		default:
@@ -146,6 +147,9 @@ func TestAlbumTracksPagesAndFillsAlbumMetadata(t *testing.T) {
 		}
 		if tr.Year != 1994 {
 			t.Fatalf("track %d year = %d, want 1994", i, tr.Year)
+		}
+		if tr.AlbumArtURL != "https://i.scdn.co/image/pid" {
+			t.Fatalf("track %d AlbumArtURL = %q, want the album placeholder's art (the per-track endpoint has none of its own)", i, tr.AlbumArtURL)
 		}
 		if tr.IsAlbum() {
 			t.Fatalf("track %d is marked as an album placeholder", i)
