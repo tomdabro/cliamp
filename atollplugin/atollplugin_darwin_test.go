@@ -286,6 +286,77 @@ func TestAcceptRequestsRefreshOnNewConnection(t *testing.T) {
 	}
 }
 
+// End-to-end through Update(), not just artworkCache directly: a cache miss
+// must still send the nowPlaying line (without artwork), trigger a
+// background fetch, and — once that fetch lands — a RefreshMsg that the
+// caller (Model/daemon) is expected to turn into a follow-up Update() that
+// this time finds the artwork cached.
+func TestUpdateSendsArtworkOnceCachedAfterAsyncFetch(t *testing.T) {
+	artDir := t.TempDir()
+	artPath := filepath.Join(artDir, "cover.png")
+	if err := os.WriteFile(artPath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write test artwork: %v", err)
+	}
+
+	socketPath := testSocketPath(t)
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+
+	msgs := make(chan tea.Msg, 8)
+	svc := &Service{listener: listener, send: func(m tea.Msg) { msgs <- m }, artwork: newArtworkCache()}
+	go svc.acceptLoop()
+	t.Cleanup(func() { _ = svc.Close() })
+
+	brokerConn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = brokerConn.Close() })
+	reader := bufio.NewReader(brokerConn)
+
+	// Drain the connect-time RefreshMsg.
+	select {
+	case <-msgs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the connect-time RefreshMsg")
+	}
+
+	track := playback.Track{Title: "Song", Artist: "Artist", ArtURL: "file://" + artPath}
+	svc.Update(playback.State{Status: playback.StatusPlaying, Track: track})
+
+	line := readLine(t, reader)
+	var first nowPlayingMessage
+	if err := json.Unmarshal(line, &first); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if first.ArtworkBase64 != "" {
+		t.Fatalf("first Update() shipped artwork on a cache miss, want empty (fetch is async)")
+	}
+
+	select {
+	case got := <-msgs:
+		if _, ok := got.(playback.RefreshMsg); !ok {
+			t.Fatalf("message after artwork fetch = %#v, want playback.RefreshMsg{}", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the post-fetch RefreshMsg")
+	}
+
+	svc.Update(playback.State{Status: playback.StatusPlaying, Track: track})
+	line = readLine(t, reader)
+	var second nowPlayingMessage
+	if err := json.Unmarshal(line, &second); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if second.ArtworkBase64 == "" {
+		t.Fatal("second Update() after the fetch completed shipped no artwork, want cached base64 data")
+	}
+}
+
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

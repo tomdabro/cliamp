@@ -364,6 +364,7 @@ func (d *daemon) snapshotState() playback.State {
 			Genre:       track.Genre,
 			TrackNumber: track.TrackNumber,
 			URL:         track.Path,
+			ArtURL:      track.AlbumArtURL,
 			Duration:    d.player.Duration(),
 		},
 		VolumeDB: d.player.Volume(),

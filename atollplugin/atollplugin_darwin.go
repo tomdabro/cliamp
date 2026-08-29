@@ -26,6 +26,7 @@ import (
 type Service struct {
 	listener net.Listener
 	send     func(tea.Msg)
+	artwork  *artworkCache
 
 	mu   sync.Mutex
 	conn net.Conn
@@ -56,7 +57,7 @@ func New(send func(tea.Msg)) (*Service, error) {
 		// Not fatal: the socket still works if the manifest is added by hand.
 	}
 
-	s := &Service{listener: listener, send: send}
+	s := &Service{listener: listener, send: send, artwork: newArtworkCache()}
 	go s.acceptLoop()
 	return s, nil
 }
@@ -147,13 +148,30 @@ func (s *Service) Update(state playback.State) {
 	if state.Track.Duration > 0 {
 		duration = state.Track.Duration.Seconds()
 	}
+
+	// A cache hit ships immediately. A miss sends this update without
+	// artwork and kicks off a background fetch (local file read or remote
+	// HTTP GET, either of which would otherwise block this call, which runs
+	// synchronously on the TUI's update loop); RefreshMsg re-triggers this
+	// same path once the fetch lands, and the retry is then a cache hit.
+	var artworkBase64 string
+	if state.Track.ArtURL != "" {
+		if cached, ok := s.artwork.get(state.Track.ArtURL); ok {
+			artworkBase64 = cached
+		} else if s.send != nil {
+			send := s.send
+			s.artwork.fetchAsync(state.Track.ArtURL, func() { send(playback.RefreshMsg{}) })
+		}
+	}
+
 	s.writeToBroker(nowPlayingMessage{
-		Title:       state.Track.Title,
-		Artist:      state.Track.Artist,
-		Album:       state.Track.Album,
-		IsPlaying:   state.Status == playback.StatusPlaying,
-		ElapsedTime: state.Position.Seconds(),
-		Duration:    duration,
+		Title:         state.Track.Title,
+		Artist:        state.Track.Artist,
+		Album:         state.Track.Album,
+		ArtworkBase64: artworkBase64,
+		IsPlaying:     state.Status == playback.StatusPlaying,
+		ElapsedTime:   state.Position.Seconds(),
+		Duration:      duration,
 	})
 }
 
