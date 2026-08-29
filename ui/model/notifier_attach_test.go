@@ -54,6 +54,7 @@ func TestAttachNotifierPublishesCurrentPlaybackState(t *testing.T) {
 			URL:      "/tmp/song.mp3",
 			Duration: time.Hour,
 		},
+		Repeat: "off",
 	}
 	if got := notifier.updates[0]; got != want {
 		t.Fatalf("notifier update = %#v, want %#v", got, want)

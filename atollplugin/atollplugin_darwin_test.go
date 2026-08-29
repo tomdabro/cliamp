@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/bjarneo/cliamp/internal/playback"
+	"github.com/bjarneo/cliamp/ipc"
 )
 
 func TestWriteManifestProducesValidPluginJSON(t *testing.T) {
@@ -90,6 +91,8 @@ func TestServiceRelaysNowPlayingOverSocket(t *testing.T) {
 		Status:   playback.StatusPlaying,
 		Track:    playback.Track{Title: "Song Title", Artist: "Artist Name", Duration: 3 * time.Minute},
 		Position: 30 * time.Second,
+		Shuffle:  true,
+		Repeat:   "all",
 	})
 
 	line := readLine(t, reader)
@@ -102,6 +105,9 @@ func TestServiceRelaysNowPlayingOverSocket(t *testing.T) {
 	}
 	if msg.ElapsedTime != 30 || msg.Duration != 180 {
 		t.Errorf("nowPlaying elapsedTime/duration = %v/%v, want 30/180", msg.ElapsedTime, msg.Duration)
+	}
+	if !msg.IsShuffled || msg.RepeatMode != "all" {
+		t.Errorf("nowPlaying isShuffled/repeatMode = %v/%q, want true/\"all\"", msg.IsShuffled, msg.RepeatMode)
 	}
 
 	svc.Update(playback.State{
@@ -223,6 +229,8 @@ func TestReadCommandsDispatchesPlaybackMessages(t *testing.T) {
 		{"nextTrack", nil, playback.NextMsg{}},
 		{"previousTrack", nil, playback.PrevMsg{}},
 		{"seek", new(42.5), playback.SetPositionMsg{Position: 42500 * time.Millisecond}},
+		{"toggleShuffle", nil, ipc.ShuffleMsg{Name: "toggle"}},
+		{"toggleRepeat", nil, ipc.RepeatMsg{Name: "cycle"}},
 	}
 	for _, tc := range cases {
 		send(tc.command, tc.seekTo)

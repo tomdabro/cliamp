@@ -31,6 +31,8 @@ type nowPlayingMessage struct {
 	IsPlaying     bool    `json:"isPlaying"`
 	ElapsedTime   float64 `json:"elapsedTime"`
 	Duration      float64 `json:"duration,omitempty"`
+	IsShuffled    bool    `json:"isShuffled"`
+	RepeatMode    string  `json:"repeatMode,omitempty"`
 }
 
 // mediaCommandMessage is the broker -> plugin line: mirrors

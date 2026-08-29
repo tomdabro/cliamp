@@ -16,6 +16,7 @@ import (
 	"github.com/bjarneo/cliamp/applog"
 	"github.com/bjarneo/cliamp/internal/appdir"
 	"github.com/bjarneo/cliamp/internal/playback"
+	"github.com/bjarneo/cliamp/ipc"
 )
 
 // Service implements playback.Notifier by relaying state to whichever
@@ -126,6 +127,15 @@ func (s *Service) dispatch(msg mediaCommandMessage) {
 		if msg.SeekTo != nil {
 			s.send(playback.SetPositionMsg{Position: time.Duration(*msg.SeekTo * float64(time.Second))})
 		}
+	case "toggleShuffle":
+		// Routed through ipc.ShuffleMsg rather than a new playback.*Msg:
+		// shuffle/repeat were only ever driven by TUI keybindings and the
+		// IPC/CLI surface (`cliamp shuffle`/`cliamp repeat`), both of which
+		// already dispatch these exact message types in both the TUI and
+		// daemon Update loops.
+		s.send(ipc.ShuffleMsg{Name: "toggle"})
+	case "toggleRepeat":
+		s.send(ipc.RepeatMsg{Name: "cycle"})
 	default:
 		applog.Warn("atollplugin: unknown command from broker: %q", msg.Command)
 	}
@@ -172,6 +182,8 @@ func (s *Service) Update(state playback.State) {
 		IsPlaying:     state.Status == playback.StatusPlaying,
 		ElapsedTime:   state.Position.Seconds(),
 		Duration:      duration,
+		IsShuffled:    state.Shuffle,
+		RepeatMode:    state.Repeat,
 	})
 }
 

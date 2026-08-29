@@ -50,6 +50,9 @@ type State struct {
 	VolumeDB float64
 	Position time.Duration
 	Seekable bool
+	Shuffle  bool
+	// Repeat is "off" / "one" / "all", lowercase.
+	Repeat string
 }
 
 type Notifier interface {

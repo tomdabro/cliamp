@@ -370,6 +370,8 @@ func (d *daemon) snapshotState() playback.State {
 		VolumeDB: d.player.Volume(),
 		Position: d.player.Position(),
 		Seekable: d.player.Seekable(),
+		Shuffle:  d.playlist.Shuffled(),
+		Repeat:   strings.ToLower(d.playlist.Repeat().String()),
 	}
 }
 

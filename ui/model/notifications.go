@@ -107,6 +107,8 @@ func (m *Model) notifyPlayback() {
 		VolumeDB: m.player.Volume(),
 		Position: m.player.Position(),
 		Seekable: m.player.Seekable(),
+		Shuffle:  m.playlist.Shuffled(),
+		Repeat:   strings.ToLower(m.playlist.Repeat().String()),
 	})
 }
 
