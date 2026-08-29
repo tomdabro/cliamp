@@ -195,11 +195,12 @@ func writeManifest(socketPath string) error {
 	}
 
 	m := manifest{
-		ID:         pluginID,
-		Name:       "cliamp",
-		Category:   "liveActivity",
-		Transport:  "unixSocket",
-		SocketPath: socketPath, // absolute: cliamp's socket lives outside the plugin folder
+		ID:              pluginID,
+		Name:            "cliamp",
+		Category:        "liveActivity",
+		Transport:       "unixSocket",
+		SocketPath:      socketPath, // absolute: cliamp's socket lives outside the plugin folder
+		ProtocolVersion: protocolVersion,
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

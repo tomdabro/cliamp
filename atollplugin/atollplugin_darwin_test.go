@@ -35,11 +35,12 @@ func TestWriteManifestProducesValidPluginJSON(t *testing.T) {
 	}
 
 	want := manifest{
-		ID:         "cliamp",
-		Name:       "cliamp",
-		Category:   "liveActivity",
-		Transport:  "unixSocket",
-		SocketPath: socketPath,
+		ID:              "cliamp",
+		Name:            "cliamp",
+		Category:        "liveActivity",
+		Transport:       "unixSocket",
+		SocketPath:      socketPath,
+		ProtocolVersion: protocolVersion,
 	}
 	if got != want {
 		t.Errorf("manifest = %+v, want %+v", got, want)

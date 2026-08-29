@@ -35,9 +35,10 @@ type dismissMessage struct {
 
 // manifest mirrors AtollPluginManager's PluginManifest (PluginManifest.swift).
 type manifest struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Category   string `json:"category"`
-	Transport  string `json:"transport"`
-	SocketPath string `json:"socketPath"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Category        string `json:"category"`
+	Transport       string `json:"transport"`
+	SocketPath      string `json:"socketPath"`
+	ProtocolVersion int    `json:"protocolVersion"`
 }
