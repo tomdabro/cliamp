@@ -190,6 +190,18 @@ func TestReadCommandsDispatchesPlaybackMessages(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = brokerConn.Close() })
 
+	// A new connection sends RefreshMsg first (see
+	// TestAcceptRequestsRefreshOnNewConnection) — drain it before asserting
+	// on command dispatch below.
+	select {
+	case got := <-msgs:
+		if _, ok := got.(playback.RefreshMsg); !ok {
+			t.Fatalf("first dispatched message = %#v, want playback.RefreshMsg{}", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the connect-time RefreshMsg")
+	}
+
 	send := func(command string, seekTo *float64) {
 		data, err := json.Marshal(mediaCommandMessage{Type: "mediaCommand", Command: command, SeekTo: seekTo})
 		if err != nil {
@@ -222,6 +234,55 @@ func TestReadCommandsDispatchesPlaybackMessages(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("command %q: timed out waiting for dispatch", tc.command)
 		}
+	}
+}
+
+// Regression: a broker that connects after the last state change (the
+// common case for the interactive TUI, which has no periodic re-push) must
+// still learn what's currently playing, not wait for the next unrelated
+// user action.
+func TestAcceptRequestsRefreshOnNewConnection(t *testing.T) {
+	socketPath := testSocketPath(t)
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+
+	msgs := make(chan tea.Msg, 8)
+	svc := &Service{listener: listener, send: func(m tea.Msg) { msgs <- m }}
+	go svc.acceptLoop()
+	t.Cleanup(func() { _ = svc.Close() })
+
+	firstConn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	select {
+	case got := <-msgs:
+		if _, ok := got.(playback.RefreshMsg); !ok {
+			t.Fatalf("message on first connect = %#v, want playback.RefreshMsg{}", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for RefreshMsg on first connect")
+	}
+
+	// A second connection replacing the first (broker restart / reconnect)
+	// must trigger its own refresh, not just the very first one ever.
+	_ = firstConn.Close()
+	secondConn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = secondConn.Close() })
+	select {
+	case got := <-msgs:
+		if _, ok := got.(playback.RefreshMsg); !ok {
+			t.Fatalf("message on reconnect = %#v, want playback.RefreshMsg{}", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for RefreshMsg on reconnect")
 	}
 }
 

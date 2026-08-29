@@ -15,6 +15,14 @@ type (
 		Position time.Duration
 	}
 	SetVolumeMsg struct{ VolumeDB float64 }
+	// RefreshMsg asks the model/daemon to re-push its current playback
+	// state to every attached Notifier, without changing anything. A
+	// Notifier that only learns about state changes as they happen (e.g.
+	// atollplugin.Service, which pushes over a socket a broker connects to
+	// asynchronously) sends this the moment a new subscriber shows up, so
+	// it doesn't have to wait for the next unrelated user action to learn
+	// what's already playing.
+	RefreshMsg struct{}
 )
 
 type Status string

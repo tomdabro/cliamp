@@ -240,6 +240,13 @@ func (d *daemon) handleMessage(msg any) {
 		cur := d.player.Position()
 		_ = d.player.Seek(m.Position - cur)
 
+	case playback.RefreshMsg:
+		// No-op here: tick() already pushes d.notifier.Update(state)
+		// unconditionally every 250ms, so a newly-connected atollplugin
+		// broker gets current state within one tick without needing this
+		// message specially handled (unlike the interactive TUI, which has
+		// no periodic push and relies on this message explicitly).
+
 	case ipc.LoadMsg:
 		d.handleLoad(m)
 

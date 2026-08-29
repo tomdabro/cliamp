@@ -72,9 +72,15 @@ func (s *Service) acceptLoop() {
 			_ = s.conn.Close()
 		}
 		s.conn = conn
-		// A newly-connected broker registers this source itself (from the
-		// manifest, on its own connect) — nothing further to track here.
 		s.mu.Unlock()
+		// A newly-connected broker registers this source itself (from the
+		// manifest, on its own connect), but has no way to learn what's
+		// already playing until the next state change — ask the owner to
+		// re-push current state now rather than leaving Atoll blank until
+		// the user's next play/pause/skip.
+		if s.send != nil {
+			s.send(playback.RefreshMsg{})
+		}
 		go s.readCommands(conn)
 	}
 }
