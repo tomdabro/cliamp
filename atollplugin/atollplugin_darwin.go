@@ -11,28 +11,33 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/bjarneo/cliamp/applog"
 	"github.com/bjarneo/cliamp/internal/appdir"
 	"github.com/bjarneo/cliamp/internal/playback"
 )
 
 // Service implements playback.Notifier by relaying state to whichever
-// AtollPluginManager broker connects to its Unix socket. There is no
-// outbound connection here: cliamp listens, matching how ipc.Server already
-// works for cliamp's own remote-control protocol.
+// AtollPluginManager broker connects to its Unix socket, and applies
+// playback commands the broker relays back from Atoll's notch controls.
+// There is no outbound connection here: cliamp listens, matching how
+// ipc.Server already works for cliamp's own remote-control protocol.
 type Service struct {
 	listener net.Listener
+	send     func(tea.Msg)
 
-	mu        sync.Mutex
-	conn      net.Conn
-	presented bool
+	mu   sync.Mutex
+	conn net.Conn
 }
 
 // New starts listening on cliamp's Atoll plugin socket and writes a
 // plugin.json manifest where AtollPluginManager's passive discovery looks
-// for it. Returns (nil, nil) if either step fails — Atoll integration is
-// optional and must never keep cliamp from starting.
-func New() (*Service, error) {
+// for it. send delivers playback commands relayed from Atoll (play, pause,
+// next, previous, seek) the same way mediactl delivers OS media-key events.
+// Returns (nil, nil) if either step fails — Atoll integration is optional
+// and must never keep cliamp from starting.
+func New(send func(tea.Msg)) (*Service, error) {
 	socketPath, err := socketPath()
 	if err != nil {
 		applog.Warn("atollplugin: resolving socket path: %v", err)
@@ -51,7 +56,7 @@ func New() (*Service, error) {
 		// Not fatal: the socket still works if the manifest is added by hand.
 	}
 
-	s := &Service{listener: listener}
+	s := &Service{listener: listener, send: send}
 	go s.acceptLoop()
 	return s, nil
 }
@@ -67,22 +72,26 @@ func (s *Service) acceptLoop() {
 			_ = s.conn.Close()
 		}
 		s.conn = conn
-		// A newly-connected broker has no memory of anything from a previous
-		// connection's lifetime (its own reconnect, or cliamp itself having
-		// restarted) — the next Update must start with presentActivity, not
-		// an updateActivity/dismissActivity for an id it never presented.
-		s.presented = false
+		// A newly-connected broker registers this source itself (from the
+		// manifest, on its own connect) — nothing further to track here.
 		s.mu.Unlock()
-		go s.readAcks(conn)
+		go s.readCommands(conn)
 	}
 }
 
-// readAcks drains the broker's ack/error responses. cliamp doesn't act on
-// them; draining just keeps the read side from backing up and notices the
-// connection closing so a later Update knows to reconnect on the next Accept.
-func (s *Service) readAcks(conn net.Conn) {
+// readCommands parses mediaCommand lines the broker relays from Atoll and
+// dispatches them as playback messages, same shape as mediactl's OS-driven
+// media-key handlers. Also notices the connection closing so a later Update
+// knows to wait for the next Accept.
+func (s *Service) readCommands(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
+		var msg mediaCommandMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			applog.Warn("atollplugin: malformed command from broker: %v", err)
+			continue
+		}
+		s.dispatch(msg)
 	}
 	s.mu.Lock()
 	if s.conn == conn {
@@ -91,28 +100,55 @@ func (s *Service) readAcks(conn net.Conn) {
 	s.mu.Unlock()
 }
 
+func (s *Service) dispatch(msg mediaCommandMessage) {
+	if s.send == nil {
+		return
+	}
+	switch msg.Command {
+	case "play":
+		s.send(playback.PlayMsg{})
+	case "pause":
+		s.send(playback.PauseMsg{})
+	case "togglePlayPause":
+		s.send(playback.PlayPauseMsg{})
+	case "nextTrack":
+		s.send(playback.NextMsg{})
+	case "previousTrack":
+		s.send(playback.PrevMsg{})
+	case "seek":
+		if msg.SeekTo != nil {
+			s.send(playback.SetPositionMsg{Position: time.Duration(*msg.SeekTo * float64(time.Second))})
+		}
+	default:
+		applog.Warn("atollplugin: unknown command from broker: %q", msg.Command)
+	}
+}
+
 func (s *Service) Update(state playback.State) {
 	if s == nil {
 		return
 	}
+	// StatusStopped means "nothing loaded" (see daemon.snapshotState),
+	// which media protocol v1 has no explicit way to represent — there's no
+	// dismiss/clear message, only nowPlaying snapshots. Simplest correct
+	// behavior available: just stop sending; Atoll keeps showing the last
+	// known state, matching how most OS Now Playing widgets behave once a
+	// player exits without another app claiming Now Playing.
 	if state.Status == playback.StatusStopped || state.Track.Title == "" {
-		s.dismiss()
 		return
 	}
-	sent := s.send(presentOrUpdateMessage{
-		Type:     messageTypeFor(s.hasPresented()),
-		ID:       activityID,
-		Title:    state.Track.Title,
-		Subtitle: state.Track.Artist,
-		Icon:     "music.note",
-		Priority: "normal",
-	})
-	// Only mark presented if this actually reached a connected broker —
-	// dropping it silently (no broker connected yet) must not make the
-	// *next* Update send updateActivity for something Atoll never got.
-	if sent {
-		s.markPresented(true)
+	var duration float64
+	if state.Track.Duration > 0 {
+		duration = state.Track.Duration.Seconds()
 	}
+	s.writeToBroker(nowPlayingMessage{
+		Title:       state.Track.Title,
+		Artist:      state.Track.Artist,
+		Album:       state.Track.Album,
+		IsPlaying:   state.Status == playback.StatusPlaying,
+		ElapsedTime: state.Position.Seconds(),
+		Duration:    duration,
+	})
 }
 
 func (s *Service) Seeked(time.Duration) {}
@@ -121,45 +157,17 @@ func (s *Service) Close() error {
 	if s == nil {
 		return nil
 	}
-	s.dismiss()
 	return s.listener.Close()
 }
 
-func (s *Service) dismiss() {
-	if !s.hasPresented() {
-		return
-	}
-	if s.send(dismissMessage{Type: "dismissActivity", ID: activityID}) {
-		s.markPresented(false)
-	}
-}
-
-func (s *Service) hasPresented() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.presented
-}
-
-func (s *Service) markPresented(v bool) {
-	s.mu.Lock()
-	s.presented = v
-	s.mu.Unlock()
-}
-
-func messageTypeFor(alreadyPresented bool) string {
-	if alreadyPresented {
-		return "updateActivity"
-	}
-	return "presentActivity"
-}
-
-// send returns whether a broker was actually connected to receive v.
-func (s *Service) send(v any) bool {
+// writeToBroker writes v to whichever broker is currently connected; a no-op if
+// none is (passive — Atoll integration is optional).
+func (s *Service) writeToBroker(v any) bool {
 	s.mu.Lock()
 	conn := s.conn
 	s.mu.Unlock()
 	if conn == nil {
-		return false // no broker connected right now; passive, just drop
+		return false
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -197,10 +205,12 @@ func writeManifest(socketPath string) error {
 	m := manifest{
 		ID:              pluginID,
 		Name:            "cliamp",
-		Category:        "liveActivity",
+		Category:        "media",
 		Transport:       "unixSocket",
 		SocketPath:      socketPath, // absolute: cliamp's socket lives outside the plugin folder
 		ProtocolVersion: protocolVersion,
+		SupportsSeek:    true,
+		SupportsSkip:    true,
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

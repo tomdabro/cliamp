@@ -715,7 +715,7 @@ func wireMediaCtl(prog *tea.Program) (*mediactl.Service, *atollplugin.Service, e
 		return nil, nil, err
 	}
 
-	atollSvc, atollErr := atollplugin.New()
+	atollSvc, atollErr := atollplugin.New(prog.Send)
 	if atollErr != nil {
 		applog.Warn("atoll plugin: %v", atollErr)
 	}

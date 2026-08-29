@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/bjarneo/cliamp/internal/playback"
 )
 
@@ -37,22 +39,15 @@ func TestWriteManifestProducesValidPluginJSON(t *testing.T) {
 	want := manifest{
 		ID:              "cliamp",
 		Name:            "cliamp",
-		Category:        "liveActivity",
+		Category:        "media",
 		Transport:       "unixSocket",
 		SocketPath:      socketPath,
 		ProtocolVersion: protocolVersion,
+		SupportsSeek:    true,
+		SupportsSkip:    true,
 	}
 	if got != want {
 		t.Errorf("manifest = %+v, want %+v", got, want)
-	}
-}
-
-func TestMessageTypeForTogglesPresentVsUpdate(t *testing.T) {
-	if got := messageTypeFor(false); got != "presentActivity" {
-		t.Errorf("messageTypeFor(false) = %q, want presentActivity", got)
-	}
-	if got := messageTypeFor(true); got != "updateActivity" {
-		t.Errorf("messageTypeFor(true) = %q, want updateActivity", got)
 	}
 }
 
@@ -64,7 +59,7 @@ func testSocketPath(t *testing.T) string {
 	return filepath.Join("/tmp", "cliamp-atollplugin-test-"+time.Now().Format("150405.000000")+".sock")
 }
 
-func TestServiceRelaysPresentUpdateDismissOverSocket(t *testing.T) {
+func TestServiceRelaysNowPlayingOverSocket(t *testing.T) {
 	socketPath := testSocketPath(t)
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
@@ -92,40 +87,34 @@ func TestServiceRelaysPresentUpdateDismissOverSocket(t *testing.T) {
 	})
 
 	svc.Update(playback.State{
-		Status: playback.StatusPlaying,
-		Track:  playback.Track{Title: "Song Title", Artist: "Artist Name"},
+		Status:   playback.StatusPlaying,
+		Track:    playback.Track{Title: "Song Title", Artist: "Artist Name", Duration: 3 * time.Minute},
+		Position: 30 * time.Second,
 	})
 
 	line := readLine(t, reader)
-	var present presentOrUpdateMessage
-	if err := json.Unmarshal(line, &present); err != nil {
-		t.Fatalf("unmarshal present message: %v", err)
+	var msg nowPlayingMessage
+	if err := json.Unmarshal(line, &msg); err != nil {
+		t.Fatalf("unmarshal nowPlaying message: %v", err)
 	}
-	if present.Type != "presentActivity" || present.ID != activityID || present.Title != "Song Title" || present.Subtitle != "Artist Name" {
-		t.Errorf("present message = %+v, want presentActivity/%s with title+artist", present, activityID)
+	if msg.Title != "Song Title" || msg.Artist != "Artist Name" || !msg.IsPlaying {
+		t.Errorf("nowPlaying message = %+v, want playing Song Title/Artist Name", msg)
+	}
+	if msg.ElapsedTime != 30 || msg.Duration != 180 {
+		t.Errorf("nowPlaying elapsedTime/duration = %v/%v, want 30/180", msg.ElapsedTime, msg.Duration)
 	}
 
 	svc.Update(playback.State{
-		Status: playback.StatusPlaying,
-		Track:  playback.Track{Title: "New Title", Artist: "Artist Name"},
+		Status: playback.StatusPaused,
+		Track:  playback.Track{Title: "Song Title", Artist: "Artist Name"},
 	})
 	line = readLine(t, reader)
-	var updated presentOrUpdateMessage
-	if err := json.Unmarshal(line, &updated); err != nil {
-		t.Fatalf("unmarshal update message: %v", err)
+	var paused nowPlayingMessage
+	if err := json.Unmarshal(line, &paused); err != nil {
+		t.Fatalf("unmarshal paused message: %v", err)
 	}
-	if updated.Type != "updateActivity" || updated.Title != "New Title" {
-		t.Errorf("update message = %+v, want updateActivity with new title", updated)
-	}
-
-	svc.Update(playback.State{Status: playback.StatusStopped})
-	line = readLine(t, reader)
-	var dismissed dismissMessage
-	if err := json.Unmarshal(line, &dismissed); err != nil {
-		t.Fatalf("unmarshal dismiss message: %v", err)
-	}
-	if dismissed.Type != "dismissActivity" || dismissed.ID != activityID {
-		t.Errorf("dismiss message = %+v, want dismissActivity/%s", dismissed, activityID)
+	if paused.IsPlaying {
+		t.Errorf("nowPlaying message after pause = %+v, want isPlaying=false", paused)
 	}
 }
 
@@ -138,11 +127,9 @@ func TestServiceUpdateAndCloseAreNilSafe(t *testing.T) {
 	}
 }
 
-// Regression: an Update() dropped because no broker was connected yet must
-// not flip presented to true — otherwise the *next* Update (once a broker
-// finally connects) sends updateActivity for an id Atoll never received a
-// presentActivity for, and Atoll rejects it.
-func TestUpdateBeforeBrokerConnectsDoesNotMarkPresented(t *testing.T) {
+// StatusStopped/empty-title Updates must be silently dropped, not sent as a
+// nowPlaying snapshot with an empty title (which the broker rejects).
+func TestUpdateWithStoppedStatusIsNotSent(t *testing.T) {
 	socketPath := testSocketPath(t)
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
@@ -154,12 +141,6 @@ func TestUpdateBeforeBrokerConnectsDoesNotMarkPresented(t *testing.T) {
 	svc := &Service{listener: listener}
 	go svc.acceptLoop()
 	t.Cleanup(func() { _ = svc.Close() })
-
-	// No broker connected: this must be silently dropped, not counted as presented.
-	svc.Update(playback.State{Status: playback.StatusPlaying, Track: playback.Track{Title: "Song"}})
-	if svc.hasPresented() {
-		t.Fatal("hasPresented() = true after an Update with no broker connected, want false")
-	}
 
 	brokerConn, err := net.Dial("unix", socketPath)
 	if err != nil {
@@ -173,14 +154,74 @@ func TestUpdateBeforeBrokerConnectsDoesNotMarkPresented(t *testing.T) {
 		return svc.conn != nil
 	})
 
-	svc.Update(playback.State{Status: playback.StatusPlaying, Track: playback.Track{Title: "Song"}})
+	svc.Update(playback.State{Status: playback.StatusStopped})
+
+	// Prove nothing arrived for the stopped Update by sending a distinct
+	// follow-up message and asserting *that* is the first line the broker
+	// sees.
+	svc.Update(playback.State{Status: playback.StatusPlaying, Track: playback.Track{Title: "Recovered"}})
 	line := readLine(t, reader)
-	var msg presentOrUpdateMessage
+	var msg nowPlayingMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if msg.Type != "presentActivity" {
-		t.Errorf("message type = %q, want presentActivity (broker never saw the first, dropped Update)", msg.Type)
+	if msg.Title != "Recovered" {
+		t.Errorf("first line title = %q, want %q (stopped Update must not have been sent)", msg.Title, "Recovered")
+	}
+}
+
+func TestReadCommandsDispatchesPlaybackMessages(t *testing.T) {
+	socketPath := testSocketPath(t)
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+
+	msgs := make(chan tea.Msg, 8)
+	svc := &Service{listener: listener, send: func(m tea.Msg) { msgs <- m }}
+	go svc.acceptLoop()
+	t.Cleanup(func() { _ = svc.Close() })
+
+	brokerConn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = brokerConn.Close() })
+
+	send := func(command string, seekTo *float64) {
+		data, err := json.Marshal(mediaCommandMessage{Type: "mediaCommand", Command: command, SeekTo: seekTo})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if _, err := brokerConn.Write(append(data, '\n')); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	cases := []struct {
+		command string
+		seekTo  *float64
+		want    tea.Msg
+	}{
+		{"play", nil, playback.PlayMsg{}},
+		{"pause", nil, playback.PauseMsg{}},
+		{"togglePlayPause", nil, playback.PlayPauseMsg{}},
+		{"nextTrack", nil, playback.NextMsg{}},
+		{"previousTrack", nil, playback.PrevMsg{}},
+		{"seek", new(42.5), playback.SetPositionMsg{Position: 42500 * time.Millisecond}},
+	}
+	for _, tc := range cases {
+		send(tc.command, tc.seekTo)
+		select {
+		case got := <-msgs:
+			if got != tc.want {
+				t.Errorf("command %q dispatched %#v, want %#v", tc.command, got, tc.want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("command %q: timed out waiting for dispatch", tc.command)
+		}
 	}
 }
 

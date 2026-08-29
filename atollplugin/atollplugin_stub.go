@@ -5,6 +5,8 @@ package atollplugin
 import (
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/bjarneo/cliamp/internal/playback"
 )
 
@@ -12,7 +14,7 @@ import (
 // on macOS.
 type Service struct{}
 
-func New() (*Service, error) { return nil, nil }
+func New(send func(tea.Msg)) (*Service, error) { return nil, nil }
 
 func (s *Service) Update(playback.State) {}
 func (s *Service) Seeked(time.Duration)  {}

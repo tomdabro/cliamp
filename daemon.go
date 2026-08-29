@@ -67,7 +67,7 @@ func runDaemon(p *player.Player, pl *playlist.Playlist, localProv *local.Provide
 		defer svc.Close()
 	}
 
-	atollSvc, atollErr := atollplugin.New()
+	atollSvc, atollErr := atollplugin.New(func(msg tea.Msg) { d.Send(msg) })
 	if atollErr != nil {
 		applog.Warn("daemon: atoll plugin unavailable: %v", atollErr)
 	}
