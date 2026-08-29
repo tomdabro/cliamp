@@ -28,8 +28,9 @@ func TestPlaylistsIncludesFollowedPlaylists(t *testing.T) {
 		case "/v1/me/playlists":
 			body = `{"items":[` +
 				`{"id":"owned","name":"Owned","snapshot_id":"one","owner":{"id":"me"},"items":{"total":2}},` +
-				`{"id":"followed","name":"Followed","snapshot_id":"two","owner":{"id":"other"},"items":{"total":3}}` +
-				`],"total":2}`
+				`{"id":"collab","name":"Collab","snapshot_id":"two","owner":{"id":"other"},"collaborative":true,"items":{"total":1}},` +
+				`{"id":"followed","name":"Followed","snapshot_id":"three","owner":{"id":"other"},"items":{"total":3}}` +
+				`],"total":3}`
 		default:
 			return nil, fmt.Errorf("unexpected Spotify API path %q", req.URL.Path)
 		}
@@ -49,13 +50,19 @@ func TestPlaylistsIncludesFollowedPlaylists(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Since Spotify's February 2026 Web API changes, GET
+	// /v1/playlists/{id}/items 403s for a playlist the user neither owns
+	// nor collaborates on -- a plain followed playlist is unaffected here
+	// (this is a different endpoint) but gets its own section so the user
+	// sees upfront that its tracks can never actually be opened.
 	want := []struct {
 		id      string
 		section string
 	}{
 		{id: "YOUR MUSIC", section: "Library"},
 		{id: "owned", section: "Your playlists"},
-		{id: "followed", section: "Followed playlists"},
+		{id: "collab", section: "Followed playlists"},
+		{id: "followed", section: "Followed playlists (not playable)"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("Playlists() returned %d playlists, want %d: %#v", len(got), len(want), got)

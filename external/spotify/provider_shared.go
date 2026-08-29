@@ -25,7 +25,16 @@ type spotifyPlaylistItem struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	SnapshotID string `json:"snapshot_id"`
-	Owner      struct {
+	// Collaborative indicates the playlist owner has enabled collaborative
+	// editing. Since Spotify's February 2026 Web API changes,
+	// GET /v1/playlists/{id}/items -- which Tracks() uses to list a
+	// playlist's contents -- 403s for any playlist the authenticated user
+	// neither owns nor collaborates on; a followed-but-not-collaborative
+	// playlist still appears here (this endpoint is unaffected) but its
+	// tracks can never be listed. Used to label that distinction upfront
+	// rather than let the user discover it as a confusing 403.
+	Collaborative bool `json:"collaborative"`
+	Owner         struct {
 		ID string `json:"id"`
 	} `json:"owner"`
 	Items *struct {

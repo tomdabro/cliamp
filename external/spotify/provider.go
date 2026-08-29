@@ -241,7 +241,7 @@ func (p *SpotifyProvider) Playlists() ([]playlist.PlaylistInfo, error) {
 		query := url.Values{
 			"limit":  {fmt.Sprintf("%d", limit)},
 			"offset": {fmt.Sprintf("%d", offset)},
-			"fields": {"items(id,name,snapshot_id,owner(id),items.total),total"},
+			"fields": {"items(id,name,snapshot_id,owner(id),collaborative,items.total),total"},
 		}
 
 		resp, err := p.webAPI(ctx, "GET", "/v1/me/playlists", query)
@@ -263,9 +263,21 @@ func (p *SpotifyProvider) Playlists() ([]playlist.PlaylistInfo, error) {
 			if item.Items != nil {
 				count = item.Items.Total
 			}
-			section := "Followed playlists"
-			if userID != "" && item.Owner.ID == userID {
+			owned := userID != "" && item.Owner.ID == userID
+			var section string
+			switch {
+			case owned:
 				section = "Your playlists"
+			case item.Collaborative:
+				section = "Followed playlists"
+			default:
+				// Since Spotify's February 2026 Web API changes,
+				// GET /v1/playlists/{id}/items 403s for a playlist the
+				// user neither owns nor collaborates on. This still lists
+				// here (a different, unaffected endpoint) but Tracks()
+				// can never open it -- label it now instead of letting
+				// the user hit a confusing 403 on selecting it.
+				section = "Followed playlists (not playable)"
 			}
 			all = append(all, playlist.PlaylistInfo{
 				ID:         item.ID,
@@ -293,11 +305,13 @@ func (p *SpotifyProvider) Playlists() ([]playlist.PlaylistInfo, error) {
 	}
 
 	// Group playlists by section so the UI can emit one header per group.
-	// Library first, then owned, then followed; preserve API order within.
+	// Library first, then owned, then playable-followed, then the
+	// not-playable followed group last; preserve API order within each.
 	sectionOrder := map[string]int{
-		"Library":            0,
-		"Your playlists":     1,
-		"Followed playlists": 2,
+		"Library":                           0,
+		"Your playlists":                    1,
+		"Followed playlists":                2,
+		"Followed playlists (not playable)": 3,
 	}
 	sort.SliceStable(all, func(i, j int) bool {
 		return sectionOrder[all[i].Section] < sectionOrder[all[j].Section]
@@ -358,7 +372,7 @@ func (p *SpotifyProvider) Tracks(playlistID string) ([]playlist.Track, error) {
 
 		if err != nil {
 			if strings.Contains(err.Error(), "403") {
-				return nil, fmt.Errorf("spotify: playlist not accessible (403): its tracks could not be listed")
+				return nil, fmt.Errorf("spotify: this playlist's tracks can't be listed -- Spotify's Web API only allows that for playlists you own or collaborate on, not ones you merely follow (a restriction Spotify added in February 2026, not something cliamp can work around)")
 			}
 			return nil, fmt.Errorf("spotify: list tracks: %w", err)
 		}
