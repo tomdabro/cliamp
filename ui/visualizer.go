@@ -423,6 +423,11 @@ type Visualizer struct {
 	luaVisNames     []string
 	luaRender       LuaVisRenderer
 	luaDriverCache  map[int]visModeDriver
+	// agcPeakDb is the rolling frame-peak in dB feeding the visualizer's
+	// automatic gain control (see Analyze): tracks the loudest band's current
+	// level with fast attack / slow decay so normalized band values stay in a
+	// consistent visual range regardless of playback volume.
+	agcPeakDb       float64
 	pulseCoordCache *pulseCoords
 	mirrorGrid      brailleGrid
 }
@@ -745,18 +750,45 @@ func (v *Visualizer) Analyze(samples []float64, spec VisAnalysisSpec) []float64 
 		im := imag(cbuf[i])
 		powers[i] = re*re + im*im
 	}
-
 	binHz := v.sr / float64(spec.FFTSize)
 	edges := v.spectrumEdges(spec.BandCount)
 
+	// Convert each band to dB against a rolling per-frame peak (AGC) instead
+	// of a fixed absolute scale: playback volume scales raw sample amplitude,
+	// so with volume turned down every band's dB value sits proportionally
+	// lower and the visualizer reads as dead even while music is playing.
+	// The peak tracker follows the loudest band with fast attack / slow decay
+	// so band values stay in the same visual range at any volume, while the
+	// attack-limited floor stops near-silent noise from being normalized into
+	// full-scale bars.
+	framePeakDb := math.Inf(-1)
 	for b := range spec.BandCount {
 		sum := averageSpectrumRangeLinear(powers, edges[b]/binHz, edges[b+1]/binHz)
-
-		// Convert to dB-like scale. 10*log10(power) == 20*log10(magnitude).
+		bands[b] = 0
 		if sum > 0 {
-			bands[b] = (10*math.Log10(sum) + 10) / 50
+			bands[b] = 10 * math.Log10(sum)
+			if bands[b] > framePeakDb {
+				framePeakDb = bands[b]
+			}
 		}
-		bands[b] = max(0, min(1, bands[b]))
+	}
+	if framePeakDb > v.agcPeakDb {
+		v.agcPeakDb = v.agcPeakDb*0.7 + framePeakDb*0.3
+	} else {
+		v.agcPeakDb = v.agcPeakDb - max(0.4, (v.agcPeakDb-framePeakDb)*0.02)
+	}
+	floorDb := v.agcPeakDb - 45
+	const agcMinFloorDb = -60
+	if floorDb < agcMinFloorDb {
+		floorDb = agcMinFloorDb
+	}
+
+	for b := range spec.BandCount {
+		normalized := 0.0
+		if bands[b] > floorDb {
+			normalized = (bands[b] - floorDb) / 45
+		}
+		bands[b] = max(0, min(1, normalized))
 
 		// Temporal smoothing: fast attack, slow decay.
 		if bands[b] > prev[b] {
